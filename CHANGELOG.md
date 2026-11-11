@@ -2,6 +2,15 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.1.1] - 2026-11-11
+
+### Fixed
+
+- Avoid false disk-full alerts from Snap SquashFS and other immutable compressed filesystem images that normally report 100% usage.
+- Use filesystem type information from GNU `df -PT` when checking capacity.
+- Preserve warnings for real mounts such as `/var`, overlay and tmpfs; add regression tests based on a Manjaro report.
+- Fix README to reflect the published repository and disk collection method.
+
 ## [0.1.0] - 2026-11-11
 
 ### Added

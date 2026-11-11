@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.1.0 — early technical MVP.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.1.1 — early technical MVP.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -36,8 +36,6 @@ cd WhyDown
 cargo build --release
 ./target/release/whydown --help
 ```
-
-**The repository URL above is the proposed publication destination, not a claim that it already exists.** Until you publish it, build from the supplied source archive.
 
 To install it in your Cargo binary directory:
 
@@ -108,7 +106,7 @@ whydown diagnose --format html --output diagnostics.html
 ### Example terminal output
 
 ```text
-WhyDown 0.1.0 [DEMO]
+WhyDown 0.1.1 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -148,7 +146,7 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Journal correlation | Classified event chronology | Reports a link/DHCP event preceding a DNS error within 120 seconds |
 | Failed services | `systemctl list-units --failed` | Lists failed service/unit identifiers |
 | Service journal events | `journalctl` | Classifies failure-like system messages |
-| Disk utilization | `df -P` | Warns at >=90% reported usage |
+| Disk utilization | `df -PT` | Warns at >=90% for writable-capable filesystem types; excludes full-by-design compressed read-only images (SquashFS, EROFS, ISO 9660, CramFS) |
 | Memory pressure | `journalctl` | Detects OOM-related messages |
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |

@@ -57,7 +57,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize) -> Snapshot {
     }
 
     if focus.includes(Focus::System) {
-        match run_capture("df", &["-P"]) {
+        match run_capture("df", &["-PT"]) {
             Ok((true, output)) => snapshot.disks = parse_df(&output),
             _ => snapshot.notes.push("Filesystem usage unavailable".into()),
         }
@@ -177,13 +177,21 @@ pub fn parse_failed_units(content: &str) -> Vec<String> {
     units
 }
 
+/// Parse GNU `df -PT` output and ignore compressed/immutable image filesystems.
+/// SquashFS, EROFS and similar filesystems are normally 100% used by design:
+/// their capacity is the image size, not available writable disk space.
+/// Keep real writable volumes (including overlay/tmpfs) eligible for warnings.
 pub fn parse_df(content: &str) -> Vec<DiskUsage> {
     content.lines().skip(1).filter_map(|line| {
         let cols: Vec<&str> = line.split_whitespace().collect();
-        if cols.len() < 6 { return None; }
-        let percent = cols[4].trim_end_matches('%').parse::<u8>().ok()?;
-        // The mountpoint is the remaining column(s). Avoid including filesystem identifiers.
-        let mountpoint = cols[5..].join(" ");
+        // `df -PT`: Filesystem Type 1024-blocks Used Available Capacity Mounted on
+        if cols.len() < 7 { return None; }
+        let fs_type = cols[1];
+        if matches!(fs_type, "squashfs" | "erofs" | "iso9660" | "cramfs") {
+            return None;
+        }
+        let percent = cols[5].trim_end_matches('%').parse::<u8>().ok()?;
+        let mountpoint = cols[6..].join(" ");
         Some(DiskUsage { mountpoint, used_percent: percent })
     }).collect()
 }
@@ -292,7 +300,36 @@ mod tests {
 
     #[test]
     fn df_works() {
+        let df = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 ext4 100 95 5 95% /\n";
+        let disks = parse_df(df);
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks[0].used_percent, 95);
+        assert_eq!(disks[0].mountpoint, "/");
+    }
+
+    #[test]
+    fn ignore_full_read_only_images_but_keep_real_disks() {
+        // Reproduces a real Manjaro report with Snap mounts at 100%.
+        let df = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n\
+/dev/nvme0n1p2 ext4 10000 9000 1000 90% /var\n\
+/dev/loop0 squashfs 128 128 0 100% /var/lib/snapd/snap/bare/5\n\
+/dev/loop1 squashfs 512 512 0 100% /var/lib/snapd/snap/core22/2955\n\
+/dev/loop2 erofs 512 512 0 100% /some/immutable/image\n\
+/dev/sr0 iso9660 1000 1000 0 100% /mnt/cdrom\n\
+/dev/loop3 cramfs 1024 1024 0 100% /mnt/compressed\n\
+overlay overlay 10000 9100 900 91% /containers\n\
+tmpfs tmpfs 1000 920 80 92% /run\n";
+        let disks = parse_df(df);
+        assert_eq!(disks.len(), 3);
+        assert_eq!(disks[0].mountpoint, "/var");
+        assert_eq!(disks[0].used_percent, 90);
+        assert_eq!(disks[1].mountpoint, "/containers");
+        assert_eq!(disks[2].mountpoint, "/run");
+    }
+
+    #[test]
+    fn untyped_df_output_is_not_misinterpreted() {
         let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 100 95 5 95% /\n";
-        assert_eq!(parse_df(df)[0].used_percent, 95);
+        assert!(parse_df(df).is_empty());
     }
 }

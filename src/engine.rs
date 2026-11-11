@@ -242,7 +242,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
                 confidence: Confidence::Observed,
                 title: format!("Filesystem usage is {}% at {}", disk.used_percent, disk.mountpoint),
                 explanation: "This filesystem is at or above 90% capacity. High utilization can affect services, but it is not proof of an incident.".into(),
-                evidence: vec![format!("`df -P` reports {}% used", disk.used_percent)],
+                evidence: vec![format!("`df -PT` reports {}% used", disk.used_percent)],
                 checks: vec!["Inspect `df -h` and disk usage before removing any files".into()],
             });
         }
