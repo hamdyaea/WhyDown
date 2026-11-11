@@ -2,6 +2,19 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.0] - 2026-11-12
+
+### Added
+- Attribute classified journal events to bounded program, network-interface or systemd-unit identifiers while discarding raw messages.
+- Group historical network incidents separately by identified interface.
+- Report read-only kernel interface `operstate` and local default routes separately from historical warnings.
+- Add finding `scope` values (`current_snapshot`, `historical_journal`, `unverified`).
+- JSON schema v2 introduces summary counters, interface `operstate`, incident `subject`, and timeline `subject`/`source` (breaking update).
+- Document the test matrix for six Linux environments and the schema/limitations.
+
+### Privacy
+- Only short ASCII-validated source/subject identifiers are retained from journal messages.
+
 ## [0.2.2] - 2026-11-12
 
 ### Fixed
