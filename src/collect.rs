@@ -268,7 +268,7 @@ fn event_source(body: &str) -> Option<String> {
 fn network_interface(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     ["eth", "enp", "eno", "ens", "enx", "wlan", "wlp", "wlx",
-     "wwan", "w w", "veth", "bond", "br", "tun", "tap", "wg", "docker"]
+     "wwan", "veth", "bond", "br", "tun", "tap", "wg", "docker"]
         .iter().any(|prefix| n.starts_with(prefix)) && !n.contains("..")
 }
 
