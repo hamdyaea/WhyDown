@@ -25,8 +25,13 @@ fn json_output_has_schema_fields() {
     assert!(result.status.success());
     let output = String::from_utf8(result.stdout).unwrap();
     assert!(output.starts_with('{'));
-    assert!(output.contains("\"schema_version\": 1"));
+    assert!(output.contains("\"schema_version\": 2"));
+    assert!(output.contains("\"summary\""));
+    assert!(output.contains("\"subject\""));
+    assert!(output.contains("\"source\""));
+    assert!(output.contains("\"operstate\""));
     assert!(output.contains("\"timeline\""));
+    assert!(output.contains("\"historical_journal\""));
 }
 
 #[test]
