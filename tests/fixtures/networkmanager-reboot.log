@@ -1,0 +1,22 @@
+1794431894.101 host systemd[1]: Stopping Network Manager...
+1794431894.102 host NetworkManager[1028]: caught SIGTERM, shutting down normally.
+1794431894.103 host NetworkManager[1028]: device (wlan0): state change: activated -> deactivating (reason 'unmanaged')
+1794431894.104 host NetworkManager[1028]: dhcp4 (wlan0): canceled DHCP transaction
+1794431894.105 host NetworkManager[1028]: dhcp4 (wlan0): state changed no lease
+1794431894.106 host NetworkManager[1028]: device (wlan0): state change: deactivating -> unmanaged (reason 'unmanaged-quitting')
+1794431894.107 host NetworkManager[1028]: manager: NetworkManager state is now DISCONNECTED
+1794431894.108 host NetworkManager[1028]: exiting (success)
+-- Boot d701ede2852f4e29b8f4056fd95fb371 --
+1794431912.100 host systemd[1]: Starting Network Manager...
+1794431912.101 host NetworkManager[1064]: NetworkManager (version 1.58.1-2) is starting...
+1794431913.101 host NetworkManager[1064]: device (wlan0): state change: unavailable -> disconnected (reason 'supplicant-available')
+1794431917.101 host NetworkManager[1064]: device (wlan0): state change: disconnected -> prepare (reason 'none')
+1794431917.102 host NetworkManager[1064]: dhcp4 (wlan0): state changed new lease, address=192.168.0.20
+1794434562.100 host systemd[1]: Stopping Network Manager...
+1794434562.101 host NetworkManager[1064]: caught SIGTERM, shutting down normally.
+1794434562.102 host NetworkManager[1064]: dhcp4 (wlan0): state changed no lease
+-- Boot 95dffd120ec74cc382578c78bcf682af --
+1794436766.100 host systemd[1]: Starting Network Manager...
+1794436770.101 host NetworkManager[1046]: device (wlan0): state change: unavailable -> disconnected (reason 'supplicant-available')
+1794436770.102 host NetworkManager[1046]: dhcp4 (wlan0): state changed new lease, address=192.168.0.20
+1794436944.100 host NetworkManager[1046]: dhcp6 (wlan0): state changed new lease

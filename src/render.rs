@@ -34,6 +34,16 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    if !report.network_incidents.is_empty() {
+        writeln!(out, "NETWORK INCIDENT WINDOWS ({} time clusters; historical observations, current connectivity not verified)", report.network_incidents.len()).unwrap();
+        for (i, group) in report.network_incidents.iter().enumerate() {
+            writeln!(out, "  {}. {} – {} | {} event(s): {}", i + 1,
+                utc_timestamp(group.start), utc_timestamp(group.end),
+                group.event_count(), group.summary()).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
     if !report.timeline.is_empty() {
         writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} events)", report.timeline.len()).unwrap();
         for event in &report.timeline {
@@ -166,7 +176,25 @@ pub fn json(report: &Report) -> String {
                 ("mountpoint", js(disk.mountpoint.clone())),
                 ("used_percent", n(disk.used_percent as u64)),
             ])).collect())),
+            ("disk_breakdowns", arr(s.disk_breakdowns.iter().map(|breakdown| object(vec![
+                ("mountpoint", js(breakdown.mountpoint.clone())),
+                ("top_directories", arr(breakdown.entries.iter().map(|dir| object(vec![
+                    ("path", js(dir.path.clone())),
+                    ("kib", n(dir.kib)),
+                ])).collect())),
+            ])).collect())),
         ])),
+        ("network_incidents", arr(report.network_incidents.iter().map(|incident| object(vec![
+            ("start", js(utc_timestamp(incident.start))),
+            ("end", js(utc_timestamp(incident.end))),
+            ("event_count", n(incident.event_count() as u64)),
+            ("summary", js(incident.summary())),
+            ("link_events", n(incident.link_events as u64)),
+            ("dhcp_events", n(incident.dhcp_events as u64)),
+            ("dns_events", n(incident.dns_events as u64)),
+            ("unreachable_events", n(incident.unreachable_events as u64)),
+            ("status", js("historical; current connectivity not verified")),
+        ])).collect())),
         ("findings", arr(report.findings.iter().map(finding_json).collect())),
         ("timeline", arr(report.timeline.iter().map(|event| object(vec![
             ("timestamp", js(utc_timestamp(event.timestamp))),
@@ -235,6 +263,14 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         out.push_str("</ul><strong>Suggested checks</strong><ul>");
         for item in &finding.checks { write!(out, "<li>{}</li>", html_escape(item)).unwrap(); }
         out.push_str("</ul></article>");
+    }
+    if !report.network_incidents.is_empty() {
+        out.push_str("<h2>Network incident windows</h2><p class=\"muted\">Historical time clusters, not proven outages. Current connectivity has not been verified.</p>");
+        for incident in &report.network_incidents {
+            write!(out, "<article class=\"card\"><h3>{}</h3><p><time>{} – {}</time></p><p>{} classified event(s)</p></article>",
+                html_escape(&incident.summary()), utc_timestamp(incident.start),
+                utc_timestamp(incident.end), incident.event_count()).unwrap();
+        }
     }
     if !report.timeline.is_empty() {
         out.push_str("<h2>Classified event timeline</h2><div class=\"timeline\">");

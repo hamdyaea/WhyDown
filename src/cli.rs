@@ -36,6 +36,7 @@ pub struct Cli {
     pub format: OutputFormat,
     pub output: Option<PathBuf>,
     pub overwrite: bool,
+    pub disk_details: bool,
 }
 
 impl Default for Cli {
@@ -48,6 +49,7 @@ impl Default for Cli {
             format: OutputFormat::Text,
             output: None,
             overwrite: false,
+            disk_details: false,
         }
     }
 }
@@ -83,6 +85,11 @@ impl Cli {
             if flag == "--version" || flag == "-V" {
                 cli.command = Command::Version;
                 return Ok(cli);
+            }
+            if flag == "--disk-details" {
+                cli.disk_details = true;
+                i += 1;
+                continue;
             }
             if flag == "--overwrite" {
                 cli.overwrite = true;
@@ -161,11 +168,13 @@ OPTIONS
   --format VALUE   text | json | html (default: text)
   --output FILE    write report to a new file (use --overwrite to replace)
   --overwrite      allow replacing an existing output file
+  --disk-details   inspect large subdirectories on near-full filesystems (may take time)
   -h, --help       display help
   -V, --version    display version
 
 EXAMPLES
   whydown diagnose --focus network --since 2h
+  whydown diagnose --focus system --disk-details
   whydown diagnose --format json --output report.json
   whydown diagnose --format html --output report.html
   whydown demo --format html --output example.html

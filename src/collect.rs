@@ -1,11 +1,11 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{DiskUsage, Event, EventKind, Focus, InterfaceStats, Snapshot};
+use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, Event, EventKind, Focus, InterfaceStats, Snapshot};
 use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
 
-pub fn collect(focus: Focus, since_unix: u64, max_events: usize) -> Snapshot {
+pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: bool) -> Snapshot {
     let mut snapshot = Snapshot {
         os: read_os_name().unwrap_or_else(|| "Unknown Linux".into()),
         kernel: read_trimmed("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Unknown".into()),
@@ -60,6 +60,32 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize) -> Snapshot {
         match run_capture("df", &["-PT"]) {
             Ok((true, output)) => snapshot.disks = parse_df(&output),
             _ => snapshot.notes.push("Filesystem usage unavailable".into()),
+        }
+        if disk_details {
+            // Optional: GNU du recursively walks the filesystem, possibly slowly.
+            // Avoid scanning the root filesystem and cap to two distinct mounts.
+            let paths: Vec<String> = snapshot.disks.iter()
+                .filter(|d| d.used_percent >= 90 && d.mountpoint != "/")
+                .map(|d| d.mountpoint.clone()).take(2).collect();
+            if paths.is_empty() {
+                snapshot.notes.push("Disk details: no eligible near-full non-root mountpoint to inspect".into());
+            }
+            for path in paths {
+                match run_capture("du", &["-x", "-k", "--max-depth=2", "--", path.as_str()]) {
+                    Ok((ok, output)) => {
+                        let entries = parse_du(&output, &path);
+                        if !ok {
+                            snapshot.notes.push(format!("Directory sizes for {path} may be incomplete due to permissions or changed files"));
+                        }
+                        if !entries.is_empty() {
+                            snapshot.disk_breakdowns.push(DiskBreakdown { mountpoint: path, entries });
+                        } else {
+                            snapshot.notes.push(format!("No directory-size details available for {path}"));
+                        }
+                    }
+                    Err(_) => snapshot.notes.push("GNU du unavailable; disk breakdown skipped".into()),
+                }
+            }
         }
     }
 
@@ -196,11 +222,31 @@ pub fn parse_df(content: &str) -> Vec<DiskUsage> {
     }).collect()
 }
 
+/// Parse GNU du -x -k --max-depth=2 output (KiB), largest subdirectories first.
+/// This is not a byte-accurate inventory: hard links, snapshots, permissions,
+/// concurrent writes and filesystem metadata can all affect the result.
+pub fn parse_du(output: &str, mountpoint: &str) -> Vec<DirectoryUsage> {
+    let prefix = format!("{}/", mountpoint.trim_end_matches('/'));
+    let mut entries: Vec<DirectoryUsage> = output.lines().filter_map(|line| {
+        let (kib, path) = line.split_once('\t')?;
+        let kib = kib.parse::<u64>().ok()?;
+        if !path.starts_with(&prefix) || path.contains("/../") { return None; }
+        let relative = &path[prefix.len()..];
+        if relative.is_empty() || relative.starts_with('.') && relative == "." { return None; }
+        if relative.split('/').count() > 2 { return None; }
+        Some(DirectoryUsage { path: path.to_string(), kib })
+    }).collect();
+    entries.sort_by(|a,b| b.kib.cmp(&a.kib).then(a.path.cmp(&b.path)));
+    entries.truncate(8);
+    entries
+}
+
 /// Parse systemd journal's `short-unix` output into coarse event types.
 /// Raw log lines are deliberately discarded: exported reports contain no log bodies.
 pub fn parse_journal(content: &str) -> Vec<Event> {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
+    let mut network_transition_until = 0_u64;
     for line in content.lines() {
         let mut parts = line.trim().splitn(2, char::is_whitespace);
         let unix = match parts.next().and_then(|v| v.split('.').next())
@@ -209,7 +255,21 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
             None => continue,
         };
         let body = parts.next().unwrap_or("");
+        let lower = body.to_ascii_lowercase();
+        // Shutdown and boot generate administrative "disconnected", "no lease"
+        // and "unmanaged" transitions. Do not label them as connectivity failures.
+        if lower.contains("stopping network manager")
+            || lower.contains("starting network manager")
+            || (lower.contains("networkmanager[") && (
+                lower.contains("caught sigterm") || lower.contains("is starting...")
+            )) {
+            network_transition_until = unix.saturating_add(60);
+        }
         let kind = match classify_log_line(body) { Some(k) => k, None => continue };
+        if matches!(kind, EventKind::LinkDown | EventKind::DhcpProblem)
+            && unix <= network_transition_until {
+            continue;
+        }
         if seen.insert((unix, kind.as_str())) {
             events.push(Event { timestamp: unix, kind });
         }
@@ -227,17 +287,28 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
     if ["no space left on device", "read-only file system", "input/output error", "i/o error"].iter().any(|p| t.contains(p)) {
         return Some(EventKind::StorageError);
     }
-    if t.contains("deauthenticat") || t.contains("lost carrier") || t.contains("carrier lost")
-        || t.contains("link is down") || t.contains("link down")
-        || t.contains("association lost")
-        || (t.contains("disconnected") && (
-            t.contains("networkmanager") || t.contains("wpa_supplicant") || t.contains("wlan")
-            || t.contains("wi-fi") || t.contains("wifi")
-        ) && !t.contains("disconnected -> activated") && !t.contains("disconnected -> connecting")) {
+
+    // These are expected when NetworkManager stops, starts or reconfigures.
+    if t.contains("canceled dhcp transaction") || t.contains("state changed no lease")
+        || t.contains("unmanaged-quitting") || t.contains("reason 'unmanaged'")
+        || t.contains("unavailable -> disconnected") || t.contains("disconnected -> unmanaged")
+        || t.contains("disconnected -> prepare") || t.contains("activated -> deactivating")
+        || t.contains("exiting (success)") || t.contains("deactivated successfully")
+        || t.contains("starting network manager") || t.contains("stopping network manager") {
+        return None;
+    }
+
+    let nm_link_change = t.contains("device (")
+        && (t.contains("activated -> disconnected") || t.contains("activated -> unavailable"));
+    let explicit_link_loss = t.contains("deauthenticat") || t.contains("lost carrier")
+        || t.contains("carrier lost") || t.contains("link is down")
+        || t.contains("association lost") || t.contains("ctrl-event-disconnected")
+        || t.contains("link down");
+    if nm_link_change || explicit_link_loss {
         return Some(EventKind::LinkDown);
     }
-    if t.contains("dhcp") && ["failed", "timeout", "timed out", "no lease", "expired", "unable", "error"].iter().any(|p| t.contains(p))
-        || t.contains("lease lost") || t.contains("failed to renew lease") {
+    let dhcp_error = t.contains("dhcp") && ["failed", "timeout", "timed out", "expired", "unable", "error"].iter().any(|p| t.contains(p));
+    if dhcp_error || t.contains("lease lost") || t.contains("failed to renew lease") {
         return Some(EventKind::DhcpProblem);
     }
     if t.contains("temporary failure in name resolution") || t.contains("name or service not known")
@@ -279,7 +350,7 @@ mod tests {
 
     #[test]
     fn journal_classification_and_order() {
-        let journal = "1700000005.123 host systemd[1]: Failed to start Example Service.\n1700000002.002 host NetworkManager[42]: device wlan0 disconnected\n1700000003.002 host systemd-resolved[3]: DNS server unreachable\n";
+        let journal = "1700000005.123 host systemd[1]: Failed to start Example Service.\n1700000002.002 host NetworkManager[42]: device (wlan0): state change: activated -> disconnected (reason 'supplicant-disconnect')\n1700000003.002 host systemd-resolved[3]: DNS server unreachable\n";
         let events = parse_journal(journal);
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].kind, EventKind::LinkDown);
@@ -290,6 +361,32 @@ mod tests {
     #[test]
     fn do_not_misread_reconnection() {
         assert_eq!(classify_log_line("NetworkManager: state change: disconnected -> activated"), None);
+    }
+
+    #[test]
+    fn reboot_networkmanager_events_are_not_link_or_dhcp_incidents() {
+        let fixture = include_str!("../tests/fixtures/networkmanager-reboot.log");
+        let events = parse_journal(fixture);
+        assert!(!events.iter().any(|e| matches!(e.kind, EventKind::LinkDown | EventKind::DhcpProblem)), "{events:?}");
+    }
+
+    #[test]
+    fn genuine_link_and_dhcp_errors_still_detected() {
+        let log = "1700000000.1 host NetworkManager[42]: device (wlan0): state change: activated -> disconnected (reason 'supplicant-disconnect')\n1700000090.1 host NetworkManager[42]: dhcp4 (wlan0): request timed out\n";
+        let events = parse_journal(log);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, EventKind::LinkDown);
+        assert_eq!(events[1].kind, EventKind::DhcpProblem);
+    }
+
+    #[test]
+    fn parse_du_sorts_and_limits_subdirectories() {
+        let output = "1024\t/var/log\n10000\t/var\n8192\t/var/cache\n4000\t/var/lib/manjaro-tools\n5000\t/var/lib\n";
+        let entries = parse_du(output, "/var");
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].path, "/var/cache");
+        assert_eq!(entries[1].path, "/var/lib");
+        assert_eq!(entries[2].path, "/var/lib/manjaro-tools");
     }
 
     #[test]

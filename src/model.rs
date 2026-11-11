@@ -151,6 +151,44 @@ pub struct DiskUsage {
 }
 
 #[derive(Debug, Clone)]
+pub struct DirectoryUsage {
+    pub path: String,
+    pub kib: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiskBreakdown {
+    pub mountpoint: String,
+    pub entries: Vec<DirectoryUsage>,
+}
+
+/// A bounded cluster of observed network-related journal events, not a proven outage.
+#[derive(Debug, Clone)]
+pub struct NetworkIncident {
+    pub start: u64,
+    pub end: u64,
+    pub link_events: usize,
+    pub dhcp_events: usize,
+    pub dns_events: usize,
+    pub unreachable_events: usize,
+}
+
+impl NetworkIncident {
+    pub fn event_count(&self) -> usize {
+        self.link_events + self.dhcp_events + self.dns_events + self.unreachable_events
+    }
+
+    pub fn summary(&self) -> String {
+        let mut names = Vec::new();
+        if self.link_events > 0 { names.push("link"); }
+        if self.dhcp_events > 0 { names.push("DHCP"); }
+        if self.dns_events > 0 { names.push("DNS"); }
+        if self.unreachable_events > 0 { names.push("unreachable"); }
+        names.join(" / ")
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
     pub kernel: String,
@@ -163,6 +201,7 @@ pub struct Snapshot {
     pub interfaces: Vec<InterfaceStats>,
     pub failed_units: Vec<String>,
     pub disks: Vec<DiskUsage>,
+    pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
     pub notes: Vec<String>,
 }
@@ -181,6 +220,7 @@ impl Default for Snapshot {
             interfaces: Vec::new(),
             failed_units: Vec::new(),
             disks: Vec::new(),
+            disk_breakdowns: Vec::new(),
             events: Vec::new(),
             notes: Vec::new(),
         }
@@ -197,4 +237,5 @@ pub struct Report {
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub timeline: Vec<Event>,
+    pub network_incidents: Vec<NetworkIncident>,
 }

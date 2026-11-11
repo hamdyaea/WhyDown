@@ -1,6 +1,6 @@
 //! Deterministic diagnostic rules. Each finding separates observation from hypothesis.
 
-use crate::model::{Confidence, Event, EventKind, Finding, Focus, Report, Severity, Snapshot};
+use crate::model::{Confidence, Event, EventKind, Finding, Focus, NetworkIncident, Report, Severity, Snapshot};
 use crate::time::{now_unix, utc_timestamp};
 
 pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bool) -> Report {
@@ -30,6 +30,11 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         });
     }
 
+    let network_incidents = if focus.includes(Focus::Network) {
+        let groups = group_network_incidents(&events, 120);
+        groups.into_iter().rev().take(30).collect::<Vec<_>>()
+            .into_iter().rev().collect()
+    } else { Vec::new() };
     let timeline = events.into_iter().rev().take(60).collect::<Vec<_>>()
         .into_iter().rev().collect();
 
@@ -42,7 +47,39 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         snapshot,
         findings,
         timeline,
+        network_incidents,
     }
+}
+
+/// Group nearby network observations into possible incident windows. These are
+/// temporal clusters, not verified causal chains or proof of continued outage.
+pub fn group_network_incidents(events: &[Event], max_gap_seconds: u64) -> Vec<NetworkIncident> {
+    let mut groups: Vec<NetworkIncident> = Vec::new();
+    let mut sorted: Vec<&Event> = events.iter()
+        .filter(|event| event.kind.focus() == Focus::Network).collect();
+    sorted.sort_by_key(|event| event.timestamp);
+    for event in sorted {
+        let append = groups.last().is_some_and(|g| {
+            event.timestamp >= g.end && event.timestamp - g.end <= max_gap_seconds
+        });
+        if !append {
+            groups.push(NetworkIncident {
+                start: event.timestamp, end: event.timestamp,
+                link_events: 0, dhcp_events: 0, dns_events: 0, unreachable_events: 0,
+            });
+        }
+        if let Some(group) = groups.last_mut() {
+            group.end = event.timestamp;
+            match event.kind {
+                EventKind::LinkDown => group.link_events += 1,
+                EventKind::DhcpProblem => group.dhcp_events += 1,
+                EventKind::DnsProblem => group.dns_events += 1,
+                EventKind::NetworkUnreachable => group.unreachable_events += 1,
+                _ => {}
+            }
+        }
+    }
+    groups
 }
 
 fn count(events: &[Event], kind: EventKind) -> usize {
@@ -236,14 +273,36 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
     for disk in &snapshot.disks {
         if disk.used_percent >= 90 {
+            let mut evidence = vec![format!("`df -PT` reports {}% used", disk.used_percent)];
+            let mut checks = vec!["Inspect `df -hT` and the largest directories before deleting anything".into()];
+            if let Some(details) = snapshot.disk_breakdowns.iter().find(|d| d.mountpoint == disk.mountpoint) {
+                for item in details.entries.iter().take(6) {
+                    evidence.push(format!("Directory {}: {:.1} GiB (recursive du estimate, nested sizes overlap)",
+                        item.path, item.kib as f64 / 1_048_576.0));
+                }
+                if details.entries.iter().any(|d| d.path.starts_with("/var/cache")) {
+                    checks.push("Review package caches; on Arch/Manjaro preview pacman cache candidates with `paccache -d` (if installed)".into());
+                }
+                if details.entries.iter().any(|d| d.path.contains("/manjaro-tools")) {
+                    checks.push("Inspect old manjaro-tools build/output directories before manually removing anything".into());
+                }
+                if details.entries.iter().any(|d| d.path.contains("/docker")) {
+                    checks.push("Inspect Docker space with `docker system df`; avoid removing live volumes".into());
+                }
+                if details.entries.iter().any(|d| d.path.starts_with("/var/log")) {
+                    checks.push("Check journal retention with `journalctl --disk-usage`".into());
+                }
+            } else {
+                checks.push("For an optional read-only directory breakdown, rerun with `--disk-details` (can take time)".into());
+            }
             findings.push(Finding {
                 id: "DISK_NEAR_FULL",
                 severity: Severity::Warning,
                 confidence: Confidence::Observed,
                 title: format!("Filesystem usage is {}% at {}", disk.used_percent, disk.mountpoint),
-                explanation: "This filesystem is at or above 90% capacity. High utilization can affect services, but it is not proof of an incident.".into(),
-                evidence: vec![format!("`df -PT` reports {}% used", disk.used_percent)],
-                checks: vec!["Inspect `df -h` and disk usage before removing any files".into()],
+                explanation: "This filesystem is at or above 90% capacity. High utilization can affect services, but it is not proof of an incident. Optional du breakdowns may differ from df due to metadata, snapshots, sparse files, permissions and concurrent writes.".into(),
+                evidence,
+                checks,
             });
         }
     }
@@ -287,6 +346,42 @@ mod tests {
             Event { timestamp: 500, kind: EventKind::DnsProblem },
         ];
         assert_eq!(adjacent_events(&events, EventKind::LinkDown, EventKind::DnsProblem, 120), None);
+    }
+
+    #[test]
+    fn network_incidents_group_temporally_and_remain_historical() {
+        let events = vec![
+            Event { timestamp: 100, kind: EventKind::LinkDown },
+            Event { timestamp: 120, kind: EventKind::DhcpProblem },
+            Event { timestamp: 150, kind: EventKind::DnsProblem },
+            Event { timestamp: 400, kind: EventKind::DhcpProblem },
+            Event { timestamp: 405, kind: EventKind::ServiceFailure },
+        ];
+        let groups = group_network_incidents(&events, 120);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].event_count(), 3);
+        assert_eq!(groups[0].summary(), "link / DHCP / DNS");
+        assert_eq!(groups[0].start, 100);
+        assert_eq!(groups[0].end, 150);
+        assert_eq!(groups[1].event_count(), 1);
+        assert_eq!(groups[1].start, 400);
+    }
+
+    #[test]
+    fn disk_breakdown_keeps_real_warning_and_explains_space() {
+        use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage};
+        let snapshot = Snapshot {
+            disks: vec![DiskUsage { mountpoint: "/var".into(), used_percent: 90 }],
+            disk_breakdowns: vec![DiskBreakdown {
+                mountpoint: "/var".into(),
+                entries: vec![DirectoryUsage {path: "/var/cache".into(), kib: 26 * 1_048_576}],
+            }],
+            ..Snapshot::default()
+        };
+        let report = analyze(snapshot, 3600, Focus::System, false);
+        let warning = report.findings.iter().find(|f| f.id == "DISK_NEAR_FULL").unwrap();
+        assert!(warning.evidence.iter().any(|s| s.contains("26.0 GiB")));
+        assert!(warning.checks.iter().any(|s| s.contains("paccache -d")));
     }
 
     #[test]

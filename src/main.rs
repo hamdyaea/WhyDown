@@ -26,7 +26,7 @@ fn run() -> Result<(), String> {
 
     let mut snapshot = match cli.command {
         Command::Demo => demo::snapshot(),
-        _ => collect::collect(cli.focus, time::now_unix().saturating_sub(cli.since_seconds), cli.max_events),
+        _ => collect::collect(cli.focus, time::now_unix().saturating_sub(cli.since_seconds), cli.max_events, cli.disk_details),
     };
     if cli.command == Command::Demo {
         let since_unix = time::now_unix().saturating_sub(cli.since_seconds);

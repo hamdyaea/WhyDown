@@ -19,6 +19,7 @@ pub fn snapshot() -> Snapshot {
         }],
         failed_units: vec!["example-backup.service".into()],
         disks: vec![DiskUsage { mountpoint: "/".into(), used_percent: 64 }],
+        disk_breakdowns: vec![],
         events: vec![
             Event { timestamp: now.saturating_sub(240), kind: EventKind::LinkDown },
             Event { timestamp: now.saturating_sub(235), kind: EventKind::DhcpProblem },
