@@ -38,7 +38,7 @@ impl Finding {
     pub fn scope(&self) -> &'static str {
         match self.id {
             "ROUTE_MISSING" | "IPV4_ROUTE_MISSING" | "DNS_UNCONFIGURED"
-            | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS"
+            | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS" | "FAILED_USER_SYSTEMD_UNITS"
             | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" => "unverified",
             _ => "historical_journal",
@@ -210,6 +210,17 @@ impl NetworkIncident {
     }
 }
 
+/// Temporal cluster of historical service log observations, not a count
+/// of independently failed services or a statement of current service health.
+#[derive(Debug, Clone)]
+pub struct ServiceEventWindow {
+    pub start: u64,
+    pub end: u64,
+    pub entry_count: usize,
+    pub unattributed_entries: usize,
+    pub units: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
@@ -222,6 +233,9 @@ pub struct Snapshot {
     pub resolved_active: Option<bool>,
     pub interfaces: Vec<InterfaceStats>,
     pub failed_units: Vec<String>,
+    pub system_units_checked: bool,
+    /// None when the user's systemd manager is inaccessible.
+    pub failed_user_units: Option<Vec<String>>,
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
@@ -241,6 +255,8 @@ impl Default for Snapshot {
             resolved_active: None,
             interfaces: Vec::new(),
             failed_units: Vec::new(),
+            system_units_checked: false,
+            failed_user_units: None,
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
@@ -260,4 +276,5 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub timeline: Vec<Event>,
     pub network_incidents: Vec<NetworkIncident>,
+    pub service_event_windows: Vec<ServiceEventWindow>,
 }
