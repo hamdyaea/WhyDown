@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.2.1 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.2.2 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -41,7 +41,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.2.1
+VERSION=v0.2.2
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -94,7 +94,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.2.1
+./target/release/whydown --version   # expects whydown 0.2.2
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -159,7 +159,7 @@ whydown diagnose --format html --output diagnostics.html
 ### Example terminal output
 
 ```text
-WhyDown 0.2.1 [DEMO]
+WhyDown 0.2.2 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -195,7 +195,7 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | IPv4/IPv6 default route | `/proc/net/route`, `/proc/net/ipv6_route` | Detects absent default routes, considering IPv6-only hosts |
 | DNS configuration | `/etc/resolv.conf` | Checks whether nameservers are configured |
 | systemd-resolved stub | `/etc/resolv.conf`, `systemctl is-active` | Warns if local stub is configured but service appears inactive |
-| Link, DHCP and DNS events | `journalctl --output=short-unix` | Classifies matching messages and shows timestamps |
+| Link, DHCP and DNS events | `journalctl --output=short-unix` | Classifies matching messages and shows timestamps; generic "link down" messages require network context so storage-controller messages are not treated as network failures |
 | Journal correlation | Classified event chronology | Reports a link/DHCP event preceding a DNS error within 120 seconds |
 | Network incident windows | Classified network journal events | Groups events separated by at most 120 seconds; historical observations, not an active-outage check |
 | Failed services | `systemctl list-units --failed` | Lists failed service/unit identifiers |
@@ -259,10 +259,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.1.x (released):** initial diagnostics, journal classification, exports, and read-only design; fix read-only-image disk false positives.
 - **v0.2.0 (released):** restart-aware network classification, historical incident windows, optional disk breakdown, Linux release archives and checksums.
 - **v0.2.1 (released):** stop mistaking the normal NetworkManager DHCP transaction timeout budget for a DHCP failure.
+- **v0.2.2 (released):** require network interface or component context for generic "link down" messages, avoiding SATA-storage false positives at boot.
 - **v0.3 (planned):** richer service attribution, tests across Linux distributions, terminal UI, evidence bundles, and pluggable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.2.1: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.2.2: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
