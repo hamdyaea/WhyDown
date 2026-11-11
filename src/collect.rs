@@ -306,10 +306,23 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
 
     let nm_link_change = t.contains("device (")
         && (t.contains("activated -> disconnected") || t.contains("activated -> unavailable"));
+    // "link down" is also emitted by storage controllers (e.g. "ata3: SATA
+    // link down" on an unused SATA port). Require network/interface context
+    // for generic "link down" text; otherwise do not report a network fault.
+    let generic_link_down = t.contains("link is down") || t.contains("link down");
+    let network_context = [
+        "networkmanager", "systemd-networkd", "wpa_supplicant",
+        "nic link", "network interface", "network link", "ethernet",
+        "wi-fi", "wifi", "netdev", "wlan", "wlp", "wlx",
+        "eth0", "eth1", "enp", "eno", "ens", "enx",
+        "veth", "bond", "br0:", "br-", "bridge",
+        "r8169", "e1000e", "igc ", "ixgbe", "virtio_net",
+    ].iter().any(|marker| t.contains(marker));
+    let storage_link = t.contains("sata link") || t.contains("ata link");
     let explicit_link_loss = t.contains("deauthenticat") || t.contains("lost carrier")
-        || t.contains("carrier lost") || t.contains("link is down")
-        || t.contains("association lost") || t.contains("ctrl-event-disconnected")
-        || t.contains("link down");
+        || t.contains("carrier lost") || t.contains("association lost")
+        || t.contains("ctrl-event-disconnected")
+        || (generic_link_down && network_context && !storage_link);
     if nm_link_change || explicit_link_loss {
         return Some(EventKind::LinkDown);
     }
@@ -395,6 +408,33 @@ mod tests {
         assert_eq!(classify_log_line(
             "NetworkManager[10]: dhcp4 (eth0): activation: beginning transaction (timeout in 45 seconds)"
         ), None);
+    }
+
+    #[test]
+    fn storage_link_down_at_boot_is_not_a_network_failure() {
+        // Captured on Manjaro on 2026-11-11 at 23:39:22 CET.
+        let sata = "1794436762.0 host kernel: ata3: SATA link down (SStatus 4 SControl 300)";
+        assert_eq!(classify_log_line(sata), None);
+        assert!(parse_journal(&format!("{sata}\n")).is_empty());
+        for line in [
+            "host kernel: ata1: SATA link is down",
+            "host kernel: Bluetooth: controller link down",
+            "host kernel: scsi disk: link down",
+        ] {
+            assert_eq!(classify_log_line(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn ethernet_link_down_still_generates_network_incidents() {
+        for line in [
+            "host kernel: e1000e 0000:00:1f.6 eth0: NIC Link is Down",
+            "host kernel: igc 0000:02:00.0 enp2s0: Link is Down",
+            "host systemd-networkd[345]: eth0: Link DOWN",
+            "host NetworkManager[123]: device (enp2s0): link down",
+        ] {
+            assert_eq!(classify_log_line(line), Some(EventKind::LinkDown), "{line}");
+        }
     }
 
     #[test]

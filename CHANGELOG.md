@@ -2,6 +2,14 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.2.2] - 2026-11-12
+
+### Fixed
+
+- Do not classify kernel messages such as `ata3: SATA link down (SStatus 4 SControl 300)` as Wi-Fi/Ethernet disconnects.
+- Require network-component or interface context before interpreting generic `link down` text as a connectivity failure.
+- Add tests for SATA/Bluetooth/non-network messages and genuine Ethernet link losses.
+
 ## [0.2.1] - 2026-11-12
 
 ### Fixed
