@@ -1,6 +1,6 @@
 //! Deterministic diagnostic rules. Each finding separates observation from hypothesis.
 
-use crate::model::{Confidence, Event, EventKind, Finding, Focus, NetworkIncident, Report, Severity, Snapshot};
+use crate::model::{Confidence, Event, EventKind, Finding, Focus, NetworkIncident, Report, ServiceEventWindow, Severity, Snapshot};
 use crate::time::{now_unix, utc_timestamp};
 
 pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bool) -> Report {
@@ -35,6 +35,10 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         groups.into_iter().rev().take(30).collect::<Vec<_>>()
             .into_iter().rev().collect()
     } else { Vec::new() };
+    let service_event_windows = if focus.includes(Focus::Services) {
+        group_service_messages(&events, 5).into_iter().rev().take(30)
+            .collect::<Vec<_>>().into_iter().rev().collect()
+    } else { Vec::new() };
     let timeline = events.into_iter().rev().take(60).collect::<Vec<_>>()
         .into_iter().rev().collect();
 
@@ -48,6 +52,7 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         findings,
         timeline,
         network_incidents,
+        service_event_windows,
     }
 }
 
@@ -88,6 +93,36 @@ pub fn group_network_incidents(events: &[Event], max_gap_seconds: u64) -> Vec<Ne
         }
     }
     groups.sort_by_key(|group| (group.start, group.end));
+    groups
+}
+
+/// A grouping of nearby service messages is not an independently failed unit.
+pub fn group_service_messages(events: &[Event], gap_seconds: u64) -> Vec<ServiceEventWindow> {
+    let mut selected: Vec<&Event> = events.iter()
+        .filter(|e| e.kind == EventKind::ServiceFailure).collect();
+    selected.sort_by_key(|e| e.timestamp);
+    let mut groups: Vec<ServiceEventWindow> = Vec::new();
+    for event in selected {
+        let append = groups.last().is_some_and(|g| {
+            event.timestamp >= g.end && event.timestamp - g.end <= gap_seconds
+        });
+        if !append {
+            groups.push(ServiceEventWindow {
+                start: event.timestamp, end: event.timestamp,
+                entry_count: 0, unattributed_entries: 0, units: Vec::new(),
+            });
+        }
+        if let Some(group) = groups.last_mut() {
+            group.end = event.timestamp;
+            group.entry_count += 1;
+            if let Some(unit) = &event.subject {
+                if !group.units.contains(unit) { group.units.push(unit.clone()); }
+            } else {
+                group.unattributed_entries += 1;
+            }
+        }
+    }
+    for group in &mut groups { group.units.sort(); }
     groups
 }
 
@@ -287,21 +322,48 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             checks: vec!["Inspect `systemctl --failed` and `journalctl -u <unit>`".into()],
         });
     }
+    if let Some(user_failed) = &snapshot.failed_user_units {
+        if !user_failed.is_empty() {
+            findings.push(Finding {
+                id: "FAILED_USER_SYSTEMD_UNITS",
+                severity: Severity::Warning,
+                confidence: Confidence::Observed,
+                title: format!("{} currently failed user systemd unit(s)", user_failed.len()),
+                explanation: "The invoking user's systemd manager reports currently failed units; separate from system units.".into(),
+                evidence: user_failed.iter().take(10).cloned().collect(),
+                checks: vec!["Inspect `systemctl --user --failed` and the user journal".into()],
+            });
+        }
+    }
     let failures = count(events, EventKind::ServiceFailure);
     if failures > 0 {
+        let distinct_seconds: std::collections::HashSet<u64> = events.iter()
+            .filter(|e| e.kind == EventKind::ServiceFailure)
+            .map(|e| e.timestamp).collect();
+        let windows = group_service_messages(events, 5);
+        let unknown = events.iter().filter(|e| {
+            e.kind == EventKind::ServiceFailure && e.subject.is_none()
+        }).count();
         findings.push(Finding {
             id: "SERVICE_FAILURE_LOGS",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: "Service failures appeared in the journal".into(),
-            explanation: "Service errors were observed, but the message classification alone does not identify which service or the underlying cause.".into(),
+            title: "Historical service-failure messages appeared in the journal".into(),
+            explanation: "Classified journal entries are NOT a count of independently failed services. Multiple units and unrelated generic messages may occur at the same time. Current system/user failed-unit states are checked separately when available.".into(),
             evidence: {
-                let mut items = vec![format!("{failures} classified service-failure event(s)")];
-                let subjects = event_subjects(events, EventKind::ServiceFailure);
-                if !subjects.is_empty() { items.push(format!("Unit(s): {}", subjects.join(", "))); }
-                items
+                let mut evidence = vec![
+                    format!("{failures} classified entries across {} distinct second(s) in {} time window(s)", distinct_seconds.len(), windows.len()),
+                    format!("{unknown} entries without an identified unit (possibly related or unrelated)"),
+                ];
+                let names = event_subjects(events, EventKind::ServiceFailure);
+                if !names.is_empty() { evidence.push(format!("Identified unit(s): {}", names.join(", "))); }
+                evidence
             },
-            checks: vec!["Inspect the relevant journal entries and failed unit details".into()],
+            checks: vec![
+                "Compare current `systemctl --failed` and `systemctl --user --failed` state".into(),
+                "Check surrounding journal lines: 15/TERM can occur during shutdown; status=1/FAILURE is a real process exit failure".into(),
+                "Inspect automatic restart policies and later recovery messages".into(),
+            ],
         });
     }
 }
@@ -416,6 +478,40 @@ mod tests {
         assert_eq!(groups[0].end, 150);
         assert_eq!(groups[1].event_count(), 1);
         assert_eq!(groups[1].start, 400);
+    }
+
+    #[test]
+    fn service_log_groups_are_not_independent_failed_units() {
+        let snapshot = Snapshot {
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            events: vec![
+                Event { timestamp: 100, kind: EventKind::ServiceFailure, subject: None, source: Some("systemd".into()) },
+                Event { timestamp: 100, kind: EventKind::ServiceFailure, subject: Some("rclone-onedrive.service".into()), source: Some("systemd".into()) },
+                Event { timestamp: 500, kind: EventKind::ServiceFailure, subject: None, source: Some("systemd".into()) },
+                Event { timestamp: 500, kind: EventKind::ServiceFailure, subject: Some("proton-backup.service".into()), source: Some("systemd".into()) },
+            ],
+            ..Snapshot::default()
+        };
+        let report = analyze(snapshot, 3_600, Focus::Services, false);
+        assert_eq!(report.service_event_windows.len(), 2);
+        assert_eq!(report.service_event_windows[0].entry_count, 2);
+        assert_eq!(report.service_event_windows[0].unattributed_entries, 1);
+        assert_eq!(report.service_event_windows[1].units, vec!["proton-backup.service"]);
+        let finding = report.findings.iter().find(|f| f.id == "SERVICE_FAILURE_LOGS").unwrap();
+        assert!(finding.explanation.contains("NOT a count"));
+    }
+
+    #[test]
+    fn current_user_failed_units_have_current_snapshot_scope() {
+        let snapshot = Snapshot {
+            failed_user_units: Some(vec!["broken-user.service".into()]),
+            system_units_checked: true,
+            ..Snapshot::default()
+        };
+        let report = analyze(snapshot, 60, Focus::Services, false);
+        assert_eq!(report.findings.iter()
+            .find(|f| f.id == "FAILED_USER_SYSTEMD_UNITS").unwrap().scope(), "current_snapshot");
     }
 
     #[test]
