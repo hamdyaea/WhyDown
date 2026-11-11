@@ -32,3 +32,10 @@ Run without root by default. Depending on your system, journal access may requir
 ## Limits
 
 WhyDown does not protect against tampered local logs, malicious binaries shadowing `journalctl` or `systemctl` in PATH, or compromised operating systems. It is a diagnostic tool and **not a sandbox, IDS, antivirus or verified forensic recorder**.
+
+
+## Event attribution (v0.3.0)
+
+JSON schema v2 includes optional `subject` (bounded interface/systemd-unit identifier) and `source` (journal program name). Only short ASCII identifiers are retained. Raw journal message bodies and hostnames are not included in event attribution.
+
+These identifiers, mountpoints and systemd units may still expose system information. Review exports before sharing. A current interface `operstate` or default route is not proof of internet connectivity; historic journal incidents do not establish the current state.
