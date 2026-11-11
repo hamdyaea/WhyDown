@@ -27,5 +27,14 @@ jobs:
         run: |
           ./target/release/whydown demo --format json --output example.json
           python3 -m json.tool example.json >/dev/null
+          python3 - <<'PY'
+          import json
+          with open('example.json', encoding='utf-8') as f:
+              report = json.load(f)
+          assert report['schema_version'] == 2
+          assert report['summary']['active_connectivity_probed'] is False
+          assert all('scope' in finding for finding in report['findings'])
+          assert any(e['subject'] == 'wlan0' for e in report['timeline'])
+          PY
           ./target/release/whydown demo --format html --output example.html
           grep -q '<!doctype html>' example.html
