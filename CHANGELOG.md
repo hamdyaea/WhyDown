@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.2.0] - 2026-11-11
+
+### Added
+- Group historical network journal observations into bounded incident windows; do not equate them with verified outages.
+- Optional `--disk-details` for read-only directory-size breakdowns of up to two near-full non-root filesystems.
+- Release workflow producing Linux x86_64 and ARM64 builds for GNU/glibc and musl with SHA-256 checksums.
+
+### Fixed
+- Avoid classifying normal NetworkManager shutdown/reboot DHCP cancellation as a Wi-Fi link failure.
+- Add reboot and real-link-failure regression cases to distinguish routine administrative transitions from actual problems.
+
+### Documentation
+- Document release binaries, `--disk-details`, network incident windows and the one-time `Cargo.lock` migration required for some v0.1.x source checkouts.
+
 ## [0.1.1] - 2026-11-11
 
 ### Fixed
