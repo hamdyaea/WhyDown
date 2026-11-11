@@ -23,8 +23,8 @@ pub fn snapshot() -> Snapshot {
         events: vec![
             Event { timestamp: now.saturating_sub(240), kind: EventKind::LinkDown, subject: Some("wlan0".into()), source: Some("NetworkManager".into()) },
             Event { timestamp: now.saturating_sub(235), kind: EventKind::DhcpProblem, subject: Some("wlan0".into()), source: Some("NetworkManager".into()) },
-            Event { timestamp: now.saturating_sub(225), kind: EventKind::DnsProblem, subject: Some("wlan0".into()), source: Some("NetworkManager".into()) },
-            Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("wlan0".into()), source: Some("NetworkManager".into()) },
+            Event { timestamp: now.saturating_sub(225), kind: EventKind::DnsProblem, subject: None, source: Some("systemd-resolved".into()) },
+            Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
         ],
         notes: vec!["DEMO DATA: no local system information was read".into()],
     }
