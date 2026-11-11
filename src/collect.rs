@@ -294,7 +294,13 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
         || t.contains("unavailable -> disconnected") || t.contains("disconnected -> unmanaged")
         || t.contains("disconnected -> prepare") || t.contains("activated -> deactivating")
         || t.contains("exiting (success)") || t.contains("deactivated successfully")
-        || t.contains("starting network manager") || t.contains("stopping network manager") {
+        || t.contains("starting network manager") || t.contains("stopping network manager")
+        // NetworkManager logs its configured DHCP transaction deadline using
+        // the word "timeout". This is a normal lease acquisition, not a timeout.
+        || (t.contains("dhcp") && (
+            t.contains("activation: beginning transaction")
+            || t.contains("state changed new lease")
+        )) {
         return None;
     }
 
@@ -377,6 +383,26 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, EventKind::LinkDown);
         assert_eq!(events[1].kind, EventKind::DhcpProblem);
+    }
+
+    #[test]
+    fn dhcp_initial_timeout_budget_is_not_failure() {
+        // 2026-11-11 Manjaro / NetworkManager startup: "timeout in 45 seconds"
+        // describes a deadline and not a failure; a new DHCPv6 lease follows.
+        let startup = "1794436944.6337 host NetworkManager[1046]: <info> dhcp6 (wlan0): activation: beginning transaction (timeout in 45 seconds)\n\
+1794436944.6540 host NetworkManager[1046]: <info> dhcp6 (wlan0): state changed new lease\n";
+        assert!(parse_journal(startup).is_empty());
+        assert_eq!(classify_log_line(
+            "NetworkManager[10]: dhcp4 (eth0): activation: beginning transaction (timeout in 45 seconds)"
+        ), None);
+    }
+
+    #[test]
+    fn genuine_dhcp_timeout_remains_classified() {
+        let failure = "1794437000.1 host NetworkManager[1046]: dhcp6 (wlan0): request timed out";
+        let events = parse_journal(failure);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::DhcpProblem);
     }
 
     #[test]
