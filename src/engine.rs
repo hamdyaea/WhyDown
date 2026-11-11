@@ -59,16 +59,24 @@ pub fn group_network_incidents(events: &[Event], max_gap_seconds: u64) -> Vec<Ne
         .filter(|event| event.kind.focus() == Focus::Network).collect();
     sorted.sort_by_key(|event| event.timestamp);
     for event in sorted {
-        let append = groups.last().is_some_and(|g| {
-            event.timestamp >= g.end && event.timestamp - g.end <= max_gap_seconds
+        // Group by interface when known; never silently combine wlan0 with eth0.
+        let position = groups.iter().rposition(|group| {
+            group.subject == event.subject
+                && event.timestamp >= group.end
+                && event.timestamp - group.end <= max_gap_seconds
         });
-        if !append {
-            groups.push(NetworkIncident {
-                start: event.timestamp, end: event.timestamp,
-                link_events: 0, dhcp_events: 0, dns_events: 0, unreachable_events: 0,
-            });
-        }
-        if let Some(group) = groups.last_mut() {
+        let index = match position {
+            Some(index) => index,
+            None => {
+                groups.push(NetworkIncident {
+                    subject: event.subject.clone(),
+                    start: event.timestamp, end: event.timestamp,
+                    link_events: 0, dhcp_events: 0, dns_events: 0, unreachable_events: 0,
+                });
+                groups.len() - 1
+            }
+        };
+        if let Some(group) = groups.get_mut(index) {
             group.end = event.timestamp;
             match event.kind {
                 EventKind::LinkDown => group.link_events += 1,
@@ -79,7 +87,17 @@ pub fn group_network_incidents(events: &[Event], max_gap_seconds: u64) -> Vec<Ne
             }
         }
     }
+    groups.sort_by_key(|group| (group.start, group.end));
     groups
+}
+
+fn event_subjects(events: &[Event], kind: EventKind) -> Vec<String> {
+    let mut subjects: Vec<String> = events.iter().filter(|e| e.kind == kind)
+        .filter_map(|e| e.subject.clone()).collect();
+    subjects.sort();
+    subjects.dedup();
+    subjects.truncate(8);
+    subjects
 }
 
 fn count(events: &[Event], kind: EventKind) -> usize {
@@ -144,13 +162,21 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
     let unreachable = count(events, EventKind::NetworkUnreachable);
 
     if links > 0 {
+        let interfaces = event_subjects(events, EventKind::LinkDown);
         findings.push(Finding {
             id: "LINK_DISCONNECTS",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
             title: "Network link disconnections were reported".into(),
             explanation: "The selected journal contains messages consistent with link loss or Wi-Fi disconnection. The physical cause cannot be established from these messages alone.".into(),
-            evidence: vec![format!("{links} distinct second(s) with classified disconnection messages"), format!("First observed: {}", timestamps(events, EventKind::LinkDown, 1).join(", "))],
+            evidence: {
+                let mut items = vec![
+                    format!("{links} classified disconnection event(s) across subject/second pairs"),
+                    format!("First observed: {}", timestamps(events, EventKind::LinkDown, 1).join(", ")),
+                ];
+                if !interfaces.is_empty() { items.push(format!("Interface(s): {}", interfaces.join(", "))); }
+                items
+            },
             checks: vec!["Inspect access point/router logs and interface carrier or Wi-Fi signal".into(), "Check NetworkManager or systemd-networkd logs around the timestamps".into()],
         });
     }
@@ -162,7 +188,12 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             confidence: Confidence::Observed,
             title: "DHCP failures were reported".into(),
             explanation: "DHCP-related failures appear in the journal. This could reflect a router, link, lease or client issue; further checks are required.".into(),
-            evidence: vec![format!("{dhcp} distinct second(s) with classified DHCP failures")],
+            evidence: {
+                let mut items = vec![format!("{dhcp} classified DHCP event(s)")];
+                let subjects = event_subjects(events, EventKind::DhcpProblem);
+                if !subjects.is_empty() { items.push(format!("Interface(s): {}", subjects.join(", "))); }
+                items
+            },
             checks: vec!["Inspect DHCP lease status and client logs".into(), "Check DHCP server/router health and whether the link stayed up".into()],
         });
     }
@@ -264,7 +295,12 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             confidence: Confidence::Observed,
             title: "Service failures appeared in the journal".into(),
             explanation: "Service errors were observed, but the message classification alone does not identify which service or the underlying cause.".into(),
-            evidence: vec![format!("{failures} distinct second(s) with classified service-failure messages")],
+            evidence: {
+                let mut items = vec![format!("{failures} classified service-failure event(s)")];
+                let subjects = event_subjects(events, EventKind::ServiceFailure);
+                if !subjects.is_empty() { items.push(format!("Unit(s): {}", subjects.join(", "))); }
+                items
+            },
             checks: vec!["Inspect the relevant journal entries and failed unit details".into()],
         });
     }
@@ -332,8 +368,8 @@ mod tests {
     #[test]
     fn correlate_link_before_dns() {
         let events = vec![
-            Event { timestamp: 100, kind: EventKind::LinkDown },
-            Event { timestamp: 130, kind: EventKind::DnsProblem },
+            Event { timestamp: 100, kind: EventKind::LinkDown, subject: None, source: None },
+            Event { timestamp: 130, kind: EventKind::DnsProblem, subject: None, source: None },
         ];
         assert_eq!(adjacent_events(&events, EventKind::LinkDown, EventKind::DnsProblem, 120), Some((100, 130)));
         assert_eq!(adjacent_events(&events, EventKind::DnsProblem, EventKind::LinkDown, 120), None);
@@ -342,20 +378,35 @@ mod tests {
     #[test]
     fn no_false_causality() {
         let events = vec![
-            Event { timestamp: 100, kind: EventKind::LinkDown },
-            Event { timestamp: 500, kind: EventKind::DnsProblem },
+            Event { timestamp: 100, kind: EventKind::LinkDown, subject: None, source: None },
+            Event { timestamp: 500, kind: EventKind::DnsProblem, subject: None, source: None },
         ];
         assert_eq!(adjacent_events(&events, EventKind::LinkDown, EventKind::DnsProblem, 120), None);
     }
 
     #[test]
+    fn network_incident_windows_separate_interfaces() {
+        let events = vec![
+            Event { timestamp: 100, kind: EventKind::LinkDown, subject: Some("wlan0".into()), source: None },
+            Event { timestamp: 105, kind: EventKind::LinkDown, subject: Some("enp3s0".into()), source: None },
+            Event { timestamp: 130, kind: EventKind::DhcpProblem, subject: Some("wlan0".into()), source: None },
+        ];
+        let groups = group_network_incidents(&events, 120);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].subject.as_deref(), Some("wlan0"));
+        assert_eq!(groups[0].event_count(), 2);
+        assert_eq!(groups[1].subject.as_deref(), Some("enp3s0"));
+        assert_eq!(groups[1].event_count(), 1);
+    }
+
+    #[test]
     fn network_incidents_group_temporally_and_remain_historical() {
         let events = vec![
-            Event { timestamp: 100, kind: EventKind::LinkDown },
-            Event { timestamp: 120, kind: EventKind::DhcpProblem },
-            Event { timestamp: 150, kind: EventKind::DnsProblem },
-            Event { timestamp: 400, kind: EventKind::DhcpProblem },
-            Event { timestamp: 405, kind: EventKind::ServiceFailure },
+            Event { timestamp: 100, kind: EventKind::LinkDown, subject: None, source: None },
+            Event { timestamp: 120, kind: EventKind::DhcpProblem, subject: None, source: None },
+            Event { timestamp: 150, kind: EventKind::DnsProblem, subject: None, source: None },
+            Event { timestamp: 400, kind: EventKind::DhcpProblem, subject: None, source: None },
+            Event { timestamp: 405, kind: EventKind::ServiceFailure, subject: None, source: None },
         ];
         let groups = group_network_incidents(&events, 120);
         assert_eq!(groups.len(), 2);
