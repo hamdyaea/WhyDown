@@ -318,7 +318,7 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
         "veth", "bond", "br0:", "br-", "bridge",
         "r8169", "e1000e", "igc ", "ixgbe", "virtio_net",
     ].iter().any(|marker| t.contains(marker));
-    let storage_link = t.contains("sata link") || t.contains("ata link");
+    let storage_link = t.contains("sata link");
     let explicit_link_loss = t.contains("deauthenticat") || t.contains("lost carrier")
         || t.contains("carrier lost") || t.contains("association lost")
         || t.contains("ctrl-event-disconnected")
