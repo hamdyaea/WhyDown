@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.2.2 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.3.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -13,7 +13,10 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
 - **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM and storage errors.
-- **Time-based correlation and network incident windows:** groups nearby journal events into historical time clusters and flags when a link problem precedes a DNS failure; neither proves an outage or its root cause.
+- **Time-based correlation and per-interface incident windows:** groups nearby journal events separately for identified network interfaces and flags when link problems precede DNS failures; correlation does not prove causation.
+- **Source attribution (v0.3.0):** bounded program, interface or systemd unit identifiers from journal messages; no raw log bodies are retained.
+- **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
+- **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
 - **Optional disk breakdown:** `--disk-details` uses `du` to list large subdirectories on up to two near-full non-root filesystems. No files are removed.
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
 - **Three output formats:** human-readable terminal output, machine-readable JSON, self-contained HTML.
@@ -41,7 +44,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.2.2
+VERSION=v0.3.0
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -94,7 +97,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.2.2
+./target/release/whydown --version   # expects whydown 0.3.0
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -152,6 +155,9 @@ whydown diagnose --format json | jq '.findings[] | {id, title, confidence}'
 
 # Export a self-contained HTML report
 whydown diagnose --format html --output diagnostics.html
+
+# Export schema-v2 JSON for comparisons
+whydown diagnose --format json --output report.json
 ```
 
 **Important:** `--since` limits the time range, but `--max-events` means that only the newest N journal entries in that range are inspected. On busy hosts, increase the limit. This is **not continuous monitoring** and does not guarantee that every relevant event is captured.
@@ -159,7 +165,7 @@ whydown diagnose --format html --output diagnostics.html
 ### Example terminal output
 
 ```text
-WhyDown 0.2.2 [DEMO]
+WhyDown 0.3.0 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -187,7 +193,7 @@ Findings  : ...
 
 This output is **illustrative**. Timestamps and the exact number/order of findings depend on the run. Use `whydown demo` for the actual output.
 
-## What the MVP checks
+## What WhyDown checks
 
 | Area | Data source | Current behavior |
 | --- | --- | --- |
@@ -197,7 +203,9 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | systemd-resolved stub | `/etc/resolv.conf`, `systemctl is-active` | Warns if local stub is configured but service appears inactive |
 | Link, DHCP and DNS events | `journalctl --output=short-unix` | Classifies matching messages and shows timestamps; generic "link down" messages require network context so storage-controller messages are not treated as network failures |
 | Journal correlation | Classified event chronology | Reports a link/DHCP event preceding a DNS error within 120 seconds |
-| Network incident windows | Classified network journal events | Groups events separated by at most 120 seconds; historical observations, not an active-outage check |
+| Network incident windows | Classified network journal events | Groups events separated by at most 120 seconds for the same identified interface; no claim of active outages |
+| Current interface state | `/sys/class/net/*/operstate` | Read-only kernel state; no internet connectivity check |
+| Event attribution | Bounded `journalctl` identifiers | Optional interface, systemd unit and program names; raw messages discarded |
 | Failed services | `systemctl list-units --failed` | Lists failed service/unit identifiers |
 | Service journal events | `journalctl` | Classifies failure-like system messages |
 | Disk utilization | `df -PT` | Warns at >=90% for writable-capable filesystem types; excludes full-by-design compressed read-only images (SquashFS, EROFS, ISO 9660, CramFS) |
@@ -214,12 +222,23 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 `NO_CLASSIFIED_ANOMALY` does **not** mean a healthy system. It means that no available observation matched the current detection rules.
 
+## Cross-distribution testing (v0.3.0)
+
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.2.2; the v0.3.0 retest and testing on the other five environments remain planned.** See the [validation matrix](docs/TEST_MATRIX.md).
+
+```bash
+whydown diagnose --since 24h --max-events 5000 --format json --output report.json
+python3 -m json.tool report.json >/dev/null
+```
+
+**Breaking schema change:** `schema_version` is now `2`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+
 ## Security and privacy
 
 - **Never run as root unless you specifically need privileged journal access.** Ordinary users can perform many checks, but journal access depends on distribution and group permissions.
 - There are **no shell commands executed through `sh -c` or `bash -c`**. External tools are called using fixed command names and separate arguments.
 - The tool **does not perform network requests** or install packages.
-- Exports intentionally omit raw journal bodies. They can still expose service names, interfaces, local mountpoints and Linux version. Review reports before sharing.
+- Exports omit raw journal bodies but may expose bounded emitting-program, systemd-unit and network-interface identifiers, mountpoints and Linux versions. Review reports before sharing.
 - `--output` refuses to overwrite a file by default. Use `--overwrite` only when you intend to replace the target.
 - A compromised local system can falsify log messages and system state. WhyDown is a diagnostic assistant, not a trust boundary or intrusion detection system.
 - The initial journal classifier uses text patterns, not a full systemd journal schema or per-distribution parser. Unexpected language, formatting or application-specific logs may be missed.
@@ -254,16 +273,17 @@ cargo build --release
 
 GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. The [release workflow](.github/workflows/release.yml) publishes four Linux archives with SHA-256 checksums when the version in `Cargo.toml` is new. **CI success does not replace real-world distribution testing.**
 
-## Planned milestones
+## Version history and roadmap
 
 - **v0.1.x (released):** initial diagnostics, journal classification, exports, and read-only design; fix read-only-image disk false positives.
 - **v0.2.0 (released):** restart-aware network classification, historical incident windows, optional disk breakdown, Linux release archives and checksums.
 - **v0.2.1 (released):** stop mistaking the normal NetworkManager DHCP transaction timeout budget for a DHCP failure.
 - **v0.2.2 (released):** require network interface or component context for generic "link down" messages, avoiding SATA-storage false positives at boot.
-- **v0.3 (planned):** richer service attribution, tests across Linux distributions, terminal UI, evidence bundles, and pluggable diagnostic rules.
+- **v0.3.0 (released):** per-interface incident grouping, bounded event attribution, current-versus-historical output, JSON schema v2.
+- **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.2.2: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.3.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 

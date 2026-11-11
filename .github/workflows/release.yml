@@ -63,7 +63,9 @@ jobs:
           expected = re.search(r'^version = "([^"]+)"', open('Cargo.toml', encoding='utf-8').read(), re.M).group(1)
           assert data['version'] == expected
           assert data['network_incidents']
-          assert data['schema_version'] == 1
+          assert data['schema_version'] == 2
+          assert data['summary']['active_connectivity_probed'] is False
+          assert any(event['subject'] == 'wlan0' for event in data['timeline'])
           PY
 
   build:

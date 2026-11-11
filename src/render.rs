@@ -1,6 +1,6 @@
 //! Text, JSON and HTML outputs. No runtime third-party dependencies.
 
-use crate::model::{Finding, Report, Severity};
+use crate::model::{Finding, Focus, Report, Severity};
 use crate::time::utc_timestamp;
 use std::fmt::Write as _;
 
@@ -23,7 +23,7 @@ pub fn text(report: &Report) -> String {
             Severity::Info => "INFO",
         };
         writeln!(out, "{}. [{label}] {}", index + 1, finding.title).unwrap();
-        writeln!(out, "   ID: {} | Confidence: {}", finding.id, finding.confidence.as_str()).unwrap();
+        writeln!(out, "   ID: {} | Confidence: {} | Scope: {}", finding.id, finding.confidence.as_str(), finding.scope()).unwrap();
         writeln!(out, "   {}", finding.explanation).unwrap();
         for item in &finding.evidence {
             writeln!(out, "   Evidence: {item}").unwrap();
@@ -34,12 +34,32 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    if report.focus.includes(Focus::Network) {
+        writeln!(out, "CURRENT LOCAL NETWORK SNAPSHOT (no connectivity probing)").unwrap();
+        writeln!(out, "  Default route: IPv4={} IPv6={}",
+            state(report.snapshot.ipv4_default_route),
+            state(report.snapshot.ipv6_default_route)).unwrap();
+        if report.snapshot.interfaces.is_empty() {
+            writeln!(out, "  Interface state: not available").unwrap();
+        } else {
+            for iface in report.snapshot.interfaces.iter().take(20) {
+                writeln!(out, "  Interface {}: operstate={} (kernel snapshot; not internet reachability)",
+                    iface.name, iface.operstate.as_deref().unwrap_or("unknown")).unwrap();
+            }
+        }
+        writeln!(out).unwrap();
+    }
+
     if !report.network_incidents.is_empty() {
         writeln!(out, "NETWORK INCIDENT WINDOWS ({} time clusters; historical observations, current connectivity not verified)", report.network_incidents.len()).unwrap();
         for (i, group) in report.network_incidents.iter().enumerate() {
             writeln!(out, "  {}. {} – {} | {} event(s): {}", i + 1,
                 utc_timestamp(group.start), utc_timestamp(group.end),
-                group.event_count(), group.summary()).unwrap();
+                group.event_count(),
+                match group.subject.as_deref() {
+                    Some(name) => format!("{} [{}]", group.summary(), name),
+                    None => format!("{} [interface unknown]", group.summary()),
+                }).unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -47,7 +67,10 @@ pub fn text(report: &Report) -> String {
     if !report.timeline.is_empty() {
         writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} events)", report.timeline.len()).unwrap();
         for event in &report.timeline {
-            writeln!(out, "  {}  {}", utc_timestamp(event.timestamp), event.kind.label()).unwrap();
+            writeln!(out, "  {}  {}{}{}",
+                utc_timestamp(event.timestamp), event.kind.label(),
+                event.subject.as_deref().map(|v| format!(" [{}]", v)).unwrap_or_default(),
+                event.source.as_deref().map(|v| format!(" via {}", v)).unwrap_or_default()).unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -63,6 +86,10 @@ pub fn text(report: &Report) -> String {
     writeln!(out, "PRIVACY: no raw journal messages are included in this report.").unwrap();
     writeln!(out, "CAUTION: findings are observations and hypotheses, not verified root causes.").unwrap();
     out
+}
+
+fn state(v: Option<bool>) -> &'static str {
+    match v { Some(true) => "present", Some(false) => "absent", None => "unknown" }
 }
 
 #[derive(Clone)]
@@ -81,6 +108,9 @@ fn arr(v: Vec<JsonValue>) -> JsonValue { JsonValue::Array(v) }
 fn object(v: Vec<(&'static str, JsonValue)>) -> JsonValue { JsonValue::Object(v) }
 fn opt_bool(v: Option<bool>) -> JsonValue { v.map(JsonValue::Bool).unwrap_or(JsonValue::Null) }
 fn opt_num(v: Option<u64>) -> JsonValue { v.map(JsonValue::Number).unwrap_or(JsonValue::Null) }
+fn opt_str(v: &Option<String>) -> JsonValue {
+    v.as_ref().map(|s| js(s.clone())).unwrap_or(JsonValue::Null)
+}
 
 fn write_escaped_json(out: &mut String, content: &str) {
     out.push('"');
@@ -138,6 +168,7 @@ fn finding_json(f: &Finding) -> JsonValue {
         ("id", js(f.id)),
         ("severity", js(f.severity.as_str())),
         ("confidence", js(f.confidence.as_str())),
+        ("scope", js(f.scope())),
         ("title", js(f.title.clone())),
         ("explanation", js(f.explanation.clone())),
         ("evidence", arr(f.evidence.iter().cloned().map(js).collect())),
@@ -148,13 +179,20 @@ fn finding_json(f: &Finding) -> JsonValue {
 pub fn json(report: &Report) -> String {
     let s = &report.snapshot;
     let value = object(vec![
-        ("schema_version", n(1)),
+        ("schema_version", n(2)),
         ("tool", js("whydown")),
         ("version", js(report.version)),
         ("generated_at", js(utc_timestamp(report.generated_at))),
         ("lookback_seconds", n(report.lookback_seconds)),
         ("focus", js(report.focus.as_str())),
         ("demo", JsonValue::Bool(report.demo)),
+        ("summary", object(vec![
+            ("warning_count", n(report.findings.iter().filter(|f| f.severity == Severity::Warning).count() as u64)),
+            ("info_count", n(report.findings.iter().filter(|f| f.severity == Severity::Info).count() as u64)),
+            ("current_warnings", n(report.findings.iter().filter(|f| f.severity == Severity::Warning && f.scope() == "current_snapshot").count() as u64)),
+            ("historical_warnings", n(report.findings.iter().filter(|f| f.severity == Severity::Warning && f.scope() == "historical_journal").count() as u64)),
+            ("active_connectivity_probed", JsonValue::Bool(false)),
+        ])),
         ("system", object(vec![
             ("os", js(s.os.clone())),
             ("kernel", js(s.kernel.clone())),
@@ -167,6 +205,7 @@ pub fn json(report: &Report) -> String {
             ("failed_units", arr(s.failed_units.iter().cloned().map(js).collect())),
             ("interfaces", arr(s.interfaces.iter().map(|iface| object(vec![
                 ("name", js(iface.name.clone())),
+                ("operstate", opt_str(&iface.operstate)),
                 ("rx_errors", n(iface.rx_errors)),
                 ("rx_dropped", n(iface.rx_dropped)),
                 ("tx_errors", n(iface.tx_errors)),
@@ -185,6 +224,7 @@ pub fn json(report: &Report) -> String {
             ])).collect())),
         ])),
         ("network_incidents", arr(report.network_incidents.iter().map(|incident| object(vec![
+            ("subject", opt_str(&incident.subject)),
             ("start", js(utc_timestamp(incident.start))),
             ("end", js(utc_timestamp(incident.end))),
             ("event_count", n(incident.event_count() as u64)),
@@ -200,9 +240,11 @@ pub fn json(report: &Report) -> String {
             ("timestamp", js(utc_timestamp(event.timestamp))),
             ("kind", js(event.kind.as_str())),
             ("label", js(event.kind.label())),
+            ("subject", opt_str(&event.subject)),
+            ("source", opt_str(&event.source)),
         ])).collect())),
         ("collection_notes", arr(s.notes.iter().cloned().map(js).collect())),
-        ("privacy", js("No raw journal lines; may contain unit names and local mountpoints")),
+        ("privacy", js("No raw journal lines; includes bounded source, unit, and interface identifiers and local mountpoints")),
         ("disclaimer", js("Observations and hypotheses, not verified root causes")),
     ]);
     let mut out = String::new();
@@ -256,26 +298,39 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
     out.push_str("</div></header><h2>Findings</h2>");
     for finding in &report.findings {
         let class = finding.severity.as_str();
-        write!(out, "<article class=\"card\"><span class=\"tag {class}\">{class}</span><h3>{}</h3><small>{} · confidence: {}</small><p>{}</p>",
-            html_escape(&finding.title), html_escape(finding.id), finding.confidence.as_str(), html_escape(&finding.explanation)).unwrap();
+        write!(out, "<article class=\"card\"><span class=\"tag {class}\">{class}</span><h3>{}</h3><small>{} · confidence: {} · scope: {}</small><p>{}</p>",
+            html_escape(&finding.title), html_escape(finding.id), finding.confidence.as_str(), finding.scope(), html_escape(&finding.explanation)).unwrap();
         out.push_str("<strong>Evidence</strong><ul>");
         for item in &finding.evidence { write!(out, "<li>{}</li>", html_escape(item)).unwrap(); }
         out.push_str("</ul><strong>Suggested checks</strong><ul>");
         for item in &finding.checks { write!(out, "<li>{}</li>", html_escape(item)).unwrap(); }
         out.push_str("</ul></article>");
     }
+    if report.focus.includes(Focus::Network) {
+        out.push_str("<h2>Current local network snapshot</h2><p class=\"muted\">Read-only kernel state; no connectivity probes performed.</p>");
+        write!(out, "<p>Default route: IPv4={} · IPv6={}</p>",
+            state(report.snapshot.ipv4_default_route), state(report.snapshot.ipv6_default_route)).unwrap();
+        for iface in report.snapshot.interfaces.iter().take(20) {
+            write!(out, "<p>Interface <code>{}</code>: operstate=<code>{}</code></p>",
+                html_escape(&iface.name), html_escape(iface.operstate.as_deref().unwrap_or("unknown"))).unwrap();
+        }
+    }
     if !report.network_incidents.is_empty() {
         out.push_str("<h2>Network incident windows</h2><p class=\"muted\">Historical time clusters, not proven outages. Current connectivity has not been verified.</p>");
         for incident in &report.network_incidents {
-            write!(out, "<article class=\"card\"><h3>{}</h3><p><time>{} – {}</time></p><p>{} classified event(s)</p></article>",
-                html_escape(&incident.summary()), utc_timestamp(incident.start),
-                utc_timestamp(incident.end), incident.event_count()).unwrap();
+            write!(out, "<article class=\"card\"><h3>{}</h3><p>Interface: {}</p><p><time>{} – {}</time></p><p>{} classified event(s)</p></article>",
+                html_escape(&incident.summary()),
+                html_escape(incident.subject.as_deref().unwrap_or("not identified")),
+                utc_timestamp(incident.start), utc_timestamp(incident.end), incident.event_count()).unwrap();
         }
     }
     if !report.timeline.is_empty() {
         out.push_str("<h2>Classified event timeline</h2><div class=\"timeline\">");
         for event in &report.timeline {
-            write!(out, "<div class=\"event\"><time>{}</time>{}</div>", utc_timestamp(event.timestamp), html_escape(event.kind.label())).unwrap();
+            write!(out, "<div class=\"event\"><time>{}</time>{}{}{}</div>",
+                utc_timestamp(event.timestamp), html_escape(event.kind.label()),
+                event.subject.as_deref().map(|s| format!(" [{}]", html_escape(s))).unwrap_or_default(),
+                event.source.as_deref().map(|s| format!(" via {}", html_escape(s))).unwrap_or_default()).unwrap();
         }
         out.push_str("</div>");
     }
@@ -300,8 +355,11 @@ mod tests {
         let plain = text(&report);
         assert!(plain.contains("LINK_BEFORE_DNS"));
         let structured = json(&report);
-        assert!(structured.contains("\"schema_version\": 1"));
+        assert!(structured.contains("\"schema_version\": 2"));
         assert!(structured.contains("\"demo\": true"));
+        assert!(structured.contains("\"scope\": \"historical_journal\""));
+        assert!(structured.contains("\"subject\": \"wlan0\""));
+        assert!(structured.contains("\"active_connectivity_probed\": false"));
         let page = html(&report);
         assert!(page.contains("<!doctype html>"));
         assert!(page.contains("DEMO DATA"));

@@ -181,8 +181,14 @@ pub fn parse_interfaces(content: &str) -> Vec<InterfaceStats> {
         if values.len() < 12 { return None; }
         let name = name.trim();
         if name == "lo" { return None; }
+        let operstate = if name.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)) {
+            fs::read_to_string(format!("/sys/class/net/{name}/operstate"))
+                .ok().map(|state| state.trim().to_string())
+                .filter(|state| matches!(state.as_str(), "up" | "down" | "unknown" | "dormant" | "lowerlayerdown" | "notpresent" | "testing"))
+        } else { None };
         Some(InterfaceStats {
             name: name.to_string(),
+            operstate,
             rx_errors: values[2],
             rx_dropped: values[3],
             tx_errors: values[10],
@@ -241,8 +247,69 @@ pub fn parse_du(output: &str, mountpoint: &str) -> Vec<DirectoryUsage> {
     entries
 }
 
-/// Parse systemd journal's `short-unix` output into coarse event types.
-/// Raw log lines are deliberately discarded: exported reports contain no log bodies.
+/// Extract only short, validated identifiers, never raw message bodies.
+fn identifier(token: &str) -> Option<String> {
+    let trimmed = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.' && c != '@');
+    if trimmed.is_empty() || trimmed.len() > 64
+        || !trimmed.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-@".contains(&b)) {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn event_source(body: &str) -> Option<String> {
+    // journalctl short-unix: <time> <hostname> <program>[pid]: <message>.
+    // Ignore hostname; take only the emitting program identifier.
+    let label = body.split_whitespace().nth(1)?.trim_end_matches(':');
+    let program = label.split('[').next().unwrap_or(label);
+    identifier(program)
+}
+
+fn network_interface(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["eth", "enp", "eno", "ens", "enx", "wlan", "wlp", "wlx",
+     "wwan", "veth", "bond", "br", "tun", "tap", "wg", "docker"]
+        .iter().any(|prefix| n.starts_with(prefix)) && !n.contains("..")
+}
+
+fn event_subject(body: &str, kind: EventKind) -> Option<String> {
+    let text = body.to_ascii_lowercase();
+    if kind.focus() == Focus::Network {
+        for marker in ["device (", "dhcp4 (", "dhcp6 (", "interface ("] {
+            if let Some(start) = text.find(marker) {
+                let rest = &text[start + marker.len()..];
+                if let Some((candidate, _)) = rest.split_once(')') {
+                    if let Some(value) = identifier(candidate) {
+                        if network_interface(&value) { return Some(value); }
+                    }
+                }
+            }
+        }
+        // Kernel messages such as "e1000e ... enp3s0: NIC Link is Down".
+        for word in text.split_whitespace() {
+            let candidate = word.trim_end_matches(':');
+            if let Some(name) = identifier(candidate) {
+                if network_interface(&name) && candidate.ends_with(':') {
+                    return Some(name);
+                }
+            }
+        }
+    }
+    if kind == EventKind::ServiceFailure {
+        for word in text.split_whitespace() {
+            if let Some(name) = identifier(word) {
+                if [".service", ".socket", ".mount", ".timer", ".target", ".path"]
+                    .iter().any(|suffix| name.ends_with(suffix)) {
+                    return Some(name);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse journalctl short-unix output into bounded classified events.
+/// Only source/subject identifiers and UTC seconds survive; raw messages are discarded.
 pub fn parse_journal(content: &str) -> Vec<Event> {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
@@ -256,8 +323,6 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
         };
         let body = parts.next().unwrap_or("");
         let lower = body.to_ascii_lowercase();
-        // Shutdown and boot generate administrative "disconnected", "no lease"
-        // and "unmanaged" transitions. Do not label them as connectivity failures.
         if lower.contains("stopping network manager")
             || lower.contains("starting network manager")
             || (lower.contains("networkmanager[") && (
@@ -270,11 +335,16 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
             && unix <= network_transition_until {
             continue;
         }
-        if seen.insert((unix, kind.as_str())) {
-            events.push(Event { timestamp: unix, kind });
+        let subject = event_subject(body, kind);
+        if seen.insert((unix, kind.as_str(), subject.clone())) {
+            events.push(Event {
+                timestamp: unix, kind, subject, source: event_source(body),
+            });
         }
     }
-    events.sort_by_key(|event| event.timestamp);
+    events.sort_by(|a,b| a.timestamp.cmp(&b.timestamp)
+        .then(a.kind.as_str().cmp(b.kind.as_str()))
+        .then(a.subject.cmp(&b.subject)));
     events
 }
 
@@ -365,6 +435,30 @@ mod tests {
     fn nameservers() {
         assert_eq!(parse_resolv_conf("# comment\nnameserver 127.0.0.53\nnameserver 1.1.1.1\n"), (2, true));
         assert_eq!(parse_resolv_conf("search example.org\n"), (0, false));
+    }
+
+    #[test]
+    fn attributed_network_and_service_events() {
+        let journal = "1700000010.100 host NetworkManager[42]: device (wlan0): state change: activated -> disconnected (reason 'supplicant-disconnect')\n\
+1700000010.200 host NetworkManager[42]: device (enp3s0): state change: activated -> disconnected (reason 'carrier')\n\
+1700000011.100 host systemd[1]: example-backup.service: Failed with result 'exit-code'.\n";
+        let events = parse_journal(journal);
+        assert_eq!(events.len(), 3, "events in same second but different interfaces must survive");
+        assert_eq!(events[0].subject.as_deref(), Some("enp3s0"));
+        assert_eq!(events[1].subject.as_deref(), Some("wlan0"));
+        assert_eq!(events[1].source.as_deref(), Some("NetworkManager"));
+        assert_eq!(events[2].subject.as_deref(), Some("example-backup.service"));
+        assert_eq!(events[2].source.as_deref(), Some("systemd"));
+        assert!(events.iter().all(|e| !e.source.as_deref().unwrap_or("").contains("host")));
+    }
+
+    #[test]
+    fn unknown_subject_is_none_and_sensitive_data_is_not_retained() {
+        let event = parse_journal("1700000000.1 host app[91]: Temporary failure in name resolution for secret.corp.example\n");
+        assert_eq!(event.len(), 1);
+        assert_eq!(event[0].kind, EventKind::DnsProblem);
+        assert_eq!(event[0].subject, None);
+        assert_eq!(event[0].source.as_deref(), Some("app"));
     }
 
     #[test]

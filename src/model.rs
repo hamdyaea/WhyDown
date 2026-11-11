@@ -33,6 +33,19 @@ impl Focus {
     }
 }
 
+impl Finding {
+    /// A live system snapshot and a historical journal observation are not interchangeable.
+    pub fn scope(&self) -> &'static str {
+        match self.id {
+            "ROUTE_MISSING" | "IPV4_ROUTE_MISSING" | "DNS_UNCONFIGURED"
+            | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS"
+            | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" => "current_snapshot",
+            "NO_CLASSIFIED_ANOMALY" => "unverified",
+            _ => "historical_journal",
+        }
+    }
+}
+
 impl fmt::Display for Focus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -133,11 +146,17 @@ impl EventKind {
 pub struct Event {
     pub timestamp: u64,
     pub kind: EventKind,
+    /// Bounded identifier extracted from the journal, not the message body.
+    pub subject: Option<String>,
+    /// Name of the emitting program (e.g. NetworkManager, kernel).
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct InterfaceStats {
     pub name: String,
+    /// Current kernel operstate, a local snapshot (not a connectivity probe).
+    pub operstate: Option<String>,
     pub rx_errors: u64,
     pub rx_dropped: u64,
     pub tx_errors: u64,
@@ -165,6 +184,9 @@ pub struct DiskBreakdown {
 /// A bounded cluster of observed network-related journal events, not a proven outage.
 #[derive(Debug, Clone)]
 pub struct NetworkIncident {
+    /// Network interface, when the journal explicitly supplied one.
+    /// Unknown subjects form separate windows from identified interfaces.
+    pub subject: Option<String>,
     pub start: u64,
     pub end: u64,
     pub link_events: usize,
