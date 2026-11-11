@@ -50,6 +50,32 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    if report.focus.includes(Focus::Services) {
+        writeln!(out, "CURRENT SYSTEMD FAILED UNIT SNAPSHOT").unwrap();
+        if report.snapshot.system_units_checked {
+            writeln!(out, "  System manager: {} failed unit(s)", report.snapshot.failed_units.len()).unwrap();
+        } else {
+            writeln!(out, "  System manager: not checked").unwrap();
+        }
+        if let Some(failed) = &report.snapshot.failed_user_units {
+            writeln!(out, "  User manager: {} failed unit(s) (invoking user)", failed.len()).unwrap();
+        } else {
+            writeln!(out, "  User manager: not checked").unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    if !report.service_event_windows.is_empty() {
+        writeln!(out, "HISTORICAL SERVICE MESSAGE WINDOWS (not independent failed-service counts)").unwrap();
+        for (i, group) in report.service_event_windows.iter().enumerate() {
+            writeln!(out, "  {}. {} – {} | {} classified entries; {} unattributed; unit(s): {}",
+                i + 1, utc_timestamp(group.start), utc_timestamp(group.end),
+                group.entry_count, group.unattributed_entries,
+                if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") }).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
     if !report.network_incidents.is_empty() {
         writeln!(out, "NETWORK INCIDENT WINDOWS ({} time clusters; historical observations, current connectivity not verified)", report.network_incidents.len()).unwrap();
         for (i, group) in report.network_incidents.iter().enumerate() {
@@ -203,6 +229,11 @@ pub fn json(report: &Report) -> String {
             ("dns_stub", JsonValue::Bool(s.dns_stub)),
             ("resolved_active", opt_bool(s.resolved_active)),
             ("failed_units", arr(s.failed_units.iter().cloned().map(js).collect())),
+            ("system_units_checked", JsonValue::Bool(s.system_units_checked)),
+            ("failed_user_units", match &s.failed_user_units {
+                Some(items) => arr(items.iter().cloned().map(js).collect()),
+                None => JsonValue::Null,
+            }),
             ("interfaces", arr(s.interfaces.iter().map(|iface| object(vec![
                 ("name", js(iface.name.clone())),
                 ("operstate", opt_str(&iface.operstate)),
@@ -223,6 +254,14 @@ pub fn json(report: &Report) -> String {
                 ])).collect())),
             ])).collect())),
         ])),
+        ("service_event_windows", arr(report.service_event_windows.iter().map(|group| object(vec![
+            ("start", js(utc_timestamp(group.start))),
+            ("end", js(utc_timestamp(group.end))),
+            ("entry_count", n(group.entry_count as u64)),
+            ("unattributed_entries", n(group.unattributed_entries as u64)),
+            ("units", arr(group.units.iter().cloned().map(js).collect())),
+            ("status", js("historical journal message cluster, not independent failed service")),
+        ])).collect())),
         ("network_incidents", arr(report.network_incidents.iter().map(|incident| object(vec![
             ("subject", opt_str(&incident.subject)),
             ("start", js(utc_timestamp(incident.start))),
@@ -315,6 +354,27 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
                 html_escape(&iface.name), html_escape(iface.operstate.as_deref().unwrap_or("unknown"))).unwrap();
         }
     }
+    if report.focus.includes(Focus::Services) {
+        out.push_str("<h2>Current systemd failed units</h2><p>");
+        write!(out, "System manager: {}; User manager: {}",
+            if report.snapshot.system_units_checked {
+                format!("{} failed", report.snapshot.failed_units.len())
+            } else { "not checked".into() },
+            match &report.snapshot.failed_user_units {
+                Some(units) => format!("{} failed (invoking user)", units.len()),
+                None => "not checked".into(),
+            }).unwrap();
+        out.push_str("</p>");
+    }
+    if !report.service_event_windows.is_empty() {
+        out.push_str("<h2>Historical service message windows</h2><p class=\"muted\">Time clusters, not independent failed services or proof of a current outage.</p>");
+        for group in &report.service_event_windows {
+            write!(out, "<article class=\"card\"><h3>{} – {}</h3><p>{} classified entries; {} without unit attribution.</p><p>Unit(s): {}</p></article>",
+                utc_timestamp(group.start), utc_timestamp(group.end),
+                group.entry_count, group.unattributed_entries,
+                html_escape(&if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") })).unwrap();
+        }
+    }
     if !report.network_incidents.is_empty() {
         out.push_str("<h2>Network incident windows</h2><p class=\"muted\">Historical time clusters, not proven outages. Current connectivity has not been verified.</p>");
         for incident in &report.network_incidents {
@@ -360,6 +420,9 @@ mod tests {
         assert!(structured.contains("\"scope\": \"historical_journal\""));
         assert!(structured.contains("\"subject\": \"wlan0\""));
         assert!(structured.contains("\"active_connectivity_probed\": false"));
+        assert!(structured.contains("\"service_event_windows\""));
+        assert!(structured.contains("\"failed_user_units\""));
+        assert!(plain.contains("CURRENT SYSTEMD FAILED UNIT SNAPSHOT"));
         let page = html(&report);
         assert!(page.contains("<!doctype html>"));
         assert!(page.contains("DEMO DATA"));
