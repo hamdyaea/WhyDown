@@ -2,6 +2,14 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.2.1] - 2026-11-12
+
+### Fixed
+
+- Do not flag NetworkManager's normal `activation: beginning transaction (timeout in 45 seconds)` informational message as an actual DHCP timeout.
+- Ignore informational `state changed new lease` lines while preserving real DHCP timeout detection.
+- Add regression tests reproducing Manjaro journal entries and confirm a real DHCP request timeout is still reported.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added
