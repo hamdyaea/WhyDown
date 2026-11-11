@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.1.1 — early technical MVP.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.2.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -13,11 +13,12 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
 - **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM and storage errors.
-- **Time-based correlation:** flags when a network link problem was logged shortly before a DNS failure, explicitly distinguishing correlation from causation.
+- **Time-based correlation and network incident windows:** groups nearby journal events into historical time clusters and flags when a link problem precedes a DNS failure; neither proves an outage or its root cause.
+- **Optional disk breakdown:** `--disk-details` uses `du` to list large subdirectories on up to two near-full non-root filesystems. No files are removed.
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
 - **Three output formats:** human-readable terminal output, machine-readable JSON, self-contained HTML.
 - **Demo mode:** show a fictional incident without reading any local system information.
-- **Linux x86_64 / ARM64:** build from source on Debian, Ubuntu, Fedora, Arch/Manjaro and Raspberry Pi OS. Other distributions may work but are not yet verified.
+- **Linux x86_64 / ARM64:** release archives for GNU/glibc and musl targets. Linux distributions differ; successful CI compilation does not guarantee every distribution has been tested.
 
 ## Quick start
 
@@ -28,7 +29,34 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - `journalctl` and `systemctl` for journal/systemd checks (optional; missing commands are reported)
 - `df` for filesystem checks (optional)
 
-### Build and install
+### Download a prebuilt Linux binary (no Rust required)
+
+Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/releases) for your CPU architecture and preferred C runtime.
+
+| Architecture | GNU / glibc | musl |
+| --- | --- | --- |
+| x86_64 | `x86_64-unknown-linux-gnu` | `x86_64-unknown-linux-musl` |
+| ARM64 / aarch64 | `aarch64-unknown-linux-gnu` | `aarch64-unknown-linux-musl` |
+
+Example for x86_64 Linux (including Manjaro):
+
+```bash
+VERSION=v0.2.0
+TARGET=x86_64-unknown-linux-gnu
+ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
+BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
+
+curl -fL -O "${BASE}/${ARCHIVE}"
+curl -fL -O "${BASE}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "${ARCHIVE}"
+./whydown --version
+./whydown demo
+```
+
+The SHA-256 checksum helps verify download integrity; it is **not a cryptographic signature**. Archives also contain this README and the GPLv3 license. No root privileges are required to extract or run the demo.
+
+### Build from source
 
 ```bash
 git clone https://github.com/hamdyaea/WhyDown.git
@@ -50,6 +78,27 @@ Or, without installing anything:
 cargo run --release -- diagnose --focus network --since 2h
 ```
 
+### Updating an existing source checkout
+
+```bash
+cd ~/WhyDown
+git pull --ff-only
+cargo build --release
+./target/release/whydown --version
+```
+
+**One-time migration from v0.1.0/v0.1.1:** builds of those versions generated a local, untracked `Cargo.lock`; v0.2.0 began tracking this file for reproducible release builds. If `git pull` stops with **“untracked working tree file Cargo.lock would be overwritten”**, back up the local file before retrying:
+
+```bash
+cd ~/WhyDown
+mv Cargo.lock ../WhyDown-Cargo.lock.backup
+git pull --ff-only
+cargo build --release
+./target/release/whydown --version   # expects whydown 0.2.0
+```
+
+Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
+
 ### First try: safe demo
 
 ```bash
@@ -69,6 +118,7 @@ whydown demo [OPTIONS]
 --focus VALUE     all | network | services | system     (default: all)
 --since VALUE     e.g. 30m, 24h, 7d                (default: 24h)
 --max-events N    newest journal lines read         (default: 500)
+--disk-details    inspect directories on near-full filesystems (optional; can take time)
 --format VALUE    text | json | html                (default: text)
 --output FILE     save to a new file
 --overwrite       allow replacing an existing file
@@ -91,6 +141,9 @@ whydown diagnose --focus services --since 7d
 # Disk usage, OOM and storage errors
 whydown diagnose --focus system
 
+# Optional deeper analysis of near-full non-root partitions (read-only; potentially slow)
+whydown diagnose --focus system --disk-details
+
 # More journal coverage if the system is very busy
 whydown diagnose --max-events 5000 --since 24h
 
@@ -106,7 +159,7 @@ whydown diagnose --format html --output diagnostics.html
 ### Example terminal output
 
 ```text
-WhyDown 0.1.1 [DEMO]
+WhyDown 0.2.0 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -144,9 +197,11 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | systemd-resolved stub | `/etc/resolv.conf`, `systemctl is-active` | Warns if local stub is configured but service appears inactive |
 | Link, DHCP and DNS events | `journalctl --output=short-unix` | Classifies matching messages and shows timestamps |
 | Journal correlation | Classified event chronology | Reports a link/DHCP event preceding a DNS error within 120 seconds |
+| Network incident windows | Classified network journal events | Groups events separated by at most 120 seconds; historical observations, not an active-outage check |
 | Failed services | `systemctl list-units --failed` | Lists failed service/unit identifiers |
 | Service journal events | `journalctl` | Classifies failure-like system messages |
 | Disk utilization | `df -PT` | Warns at >=90% for writable-capable filesystem types; excludes full-by-design compressed read-only images (SquashFS, EROFS, ISO 9660, CramFS) |
+| Optional disk details | `du -x -k --max-depth=2` | Read-only breakdown for up to two eligible near-full non-root mounts; may be slow or incomplete |
 | Memory pressure | `journalctl` | Detects OOM-related messages |
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |
@@ -197,16 +252,16 @@ cargo clippy --all-targets
 cargo build --release
 ```
 
-The GitHub Actions workflow runs tests and a release build on Ubuntu Linux. This project is a starting point; **the maintainer must verify the behavior on each claimed distribution before publishing platform support as tested**.
+GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. The [release workflow](.github/workflows/release.yml) publishes four Linux archives with SHA-256 checksums when the version in `Cargo.toml` is new. **CI success does not replace real-world distribution testing.**
 
 ## Planned milestones
 
-- **v0.1.x:** integration test fixtures for multiple distros, better journal limitations/reporting, packaging and reproducible builds.
-- **v0.2:** configurable diagnostic rule library, richer service attribution, networking timeline, optional sampling to detect changing interface counters.
-- **v0.3:** curses-style TUI, safe evidence bundle export and pluggable distribution-specific collectors.
+- **v0.1.x (released):** initial diagnostics, journal classification, exports, and read-only design; fix read-only-image disk false positives.
+- **v0.2.0 (released):** restart-aware network classification, historical incident windows, optional disk breakdown, Linux release archives and checksums.
+- **v0.3 (planned):** richer service attribution, tests across Linux distributions, terminal UI, evidence bundles, and pluggable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.1: continuous monitoring, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, cloud dashboards.
+Features not implemented in v0.2.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
