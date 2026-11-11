@@ -1,0 +1,21 @@
+[package]
+name = "whydown"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "GPL-3.0-only"
+authors = ["Hamdy Abou El Anein"]
+description = "Evidence-based, read-only Linux troubleshooting from your terminal"
+readme = "README.md"
+keywords = ["linux", "diagnostics", "troubleshooting", "systemd", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
+[features]
+default = []
