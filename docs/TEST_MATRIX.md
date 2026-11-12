@@ -313,3 +313,13 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - The test simulates a desktop color-scheme change in System mode, verifies both dark/light palettes appear, and checks that the stored `system` choice remains untouched.
 - The existing mouse selection, native Ctrl+C, exact Copy selection, timeline and coverage tests still run after theme changes; no GUI theme selection affects report contents or CLI/TUI behavior.
 - Automatic live system-following is dependent on Qt/desktop integration: Qt 6.5+ color scheme notifications are observed when available; earlier versions fall back to the native palette and its change notifications when provided. Manual Manjaro/Debian system-theme verification remains pending.
+
+## v0.10.2 onboarding and README screenshot
+
+- First-launch Qt6 GUI must default to **Dark** with no stored `appearance/theme` setting; merely opening the GUI must not persist a new user preference.
+- Saved `Light`, `Dark` and `System` preferences remain in effect across new GUI windows. Unknown/invalid values safely normalize to Dark, while explicit System still uses the desktop appearance where supported.
+- Unit tests exercise theme preference normalization. Qt6/Xvfb integration tests use an isolated `XDG_CONFIG_HOME` to simulate a fresh install and verify no configuration writes on launch, theme switching and existing mouse selection/clipboard support.
+- The main README is short (at most 170 lines), contains clone/install/update examples, desktop/terminal/CLI launch commands, Manjaro/Debian PyQt6 package hints, documentation links and a local screenshot reference.
+- A new `tests/test_readme.py` asserts the referenced `docs/images/whydown-gui-dark.jpg` is committed, has valid JPEG markers and a nontrivial size; it checks that long-form technical material remains in `docs/PROJECT_HISTORY.md`.
+- The screenshot generator `scripts/capture_gui_for_readme.py` uses only **fictional WhyDown demo evidence** and isolated Qt settings under Xvfb, rather than inspecting real journal data. Its output is versioned in Git; release tests do not regenerate or mutate it.
+- These checks run in normal Linux CI and the release preflight. GUI clipboard integration on physical Manjaro/Debian desktops remains a separate field test.
