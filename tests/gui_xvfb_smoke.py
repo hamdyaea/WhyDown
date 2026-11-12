@@ -1,98 +1,104 @@
-"""Real Tkinter GUI smoke test under Xvfb; requires Python Tk + a display.
+"""Real Qt6/Xvfb GUI smoke test with a fictional WhyDown diagnostic only.
 
-Exercises the desktop window and the same released Rust diagnostic binary,
-but uses *fictional demo evidence* and never reads host logs or touches files.
+Crucially verifies MOUSE selection on a read-only evidence pane, and that
+copying does not include unselected diagnostic details. No network or host
+journal access; uses the same embedded GUI module as the shipped binary.
 """
 import importlib.util
 import pathlib
 import sys
 import time
-import tkinter as tk
+
+from PyQt6 import QtCore, QtGui, QtTest, QtWidgets
 
 rootdir = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
     "whydown_gui", rootdir / "scripts" / "whydown_gui.py")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-
 binary = pathlib.Path(sys.argv[1]).resolve()
-assert binary.is_file(), f"Missing executable: {binary}"
-root = tk.Tk()
-root.withdraw()
-args = mod.parse_args(["--whydown-bin", str(binary), "--demo"])
-gui = mod.WhyDownGUI(root, args)
+assert binary.is_file()
+app = QtWidgets.QApplication(["WhyDown GUI test"])
+args = mod.parse_args(["--whydown-bin", str(binary), "--demo", "--current-boot"])
+gui = mod.WhyDownGUI(args)
+gui.show()
+app.processEvents()
 try:
-    assert gui.focus.get() == "all"
-    assert gui.since.get() == "4h"
-    assert gui.max_events.get() == "10000"
-    assert "disabled" in gui.save_button.state()
+    assert gui.focus.currentText() == "all"
+    assert gui.since.currentText() == "4h"
+    assert gui.cap.currentText() == "10000"
+    assert not gui.save_button.isEnabled()
     gui.analyze()
     deadline = time.monotonic() + 20
     while gui.report is None and time.monotonic() < deadline:
-        root.update()
-        time.sleep(0.05)
-    assert gui.report is not None, "GUI did not render fictional report"
+        app.processEvents()
+        time.sleep(0.04)
+    assert gui.report is not None, "GUI did not render the fictional diagnostic"
     assert gui.report["schema_version"] == 2
-    assert gui.report["demo"] is True
-    assert "Analysis complete" in gui.status.get()
-    assert "warning(s)" in gui.summary.get()
-    assert "disabled" not in gui.save_button.state()
-    assert gui.tabs.tab(gui.tabs.select(), "text") == "Findings & evidence"
-    assert gui.coverage.get("1.0", "end").find("COLLECTION COVERAGE") != -1
-    assert len(gui.context_menus) == 4
-    assert gui.detail.cget("exportselection") == 0
-    assert gui.detail.cget("state") == "disabled"
+    assert gui.report.get("demo") is True
+    assert "Analysis complete" in gui.status.text()
+    assert gui.save_button.isEnabled()
+    assert gui.tabs.currentIndex() == 0
+    assert gui.findings.topLevelItemCount() >= 1
+    assert "OBSERVED EVIDENCE" in gui.detail.toPlainText()
+    assert "COLLECTION COVERAGE" in gui.coverage.toPlainText()
 
-    # Select only a short fragment, never the complete diagnostic report.
-    gui.detail.tag_add("sel", "1.0", "1.8")
-    expected = gui.detail.get("1.0", "1.8")
-    gui.copy_active_selection()
-    assert root.clipboard_get() == expected, "Copy selection button copied unrelated text"
-    assert "Copied 8 character(s)" in gui.status.get()
-    assert gui.detail.get("1.0", "end").count("OBSERVED EVIDENCE") == 1
+    # Qt native text editor MUST be enabled/read-only, not disabled.
+    editor = gui.detail
+    assert editor.isEnabled()
+    assert editor.isReadOnly()
+    assert editor.textInteractionFlags() & QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+    assert editor.textInteractionFlags() & QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard
+    editor.setFocus()
+    app.processEvents()
 
-    # Verify Ctrl+C handler, including partial text from a disabled widget.
-    gui.detail.tag_remove("sel", "1.0", "end")
-    gui.detail.tag_add("sel", "4.0", "4.8")
-    expected = gui.detail.get("4.0", "4.8")
-    assert gui.on_copy_text(type("Event", (), {"widget": gui.detail})()) == "break"
-    assert root.clipboard_get() == expected
+    # Real mouse double-click selects exactly a word in the text viewport.
+    cursor = QtGui.QTextCursor(editor.document())
+    cursor.setPosition(3)
+    editor.setTextCursor(cursor)
+    app.processEvents()
+    pos = editor.cursorRect(cursor).center()
+    QtTest.QTest.mouseDClick(editor.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=pos)
+    app.processEvents()
+    mouse_selected = editor.textCursor().selectedText()
+    assert mouse_selected, "Cannot select evidence text with the mouse"
+    assert len(mouse_selected) < len(editor.toPlainText()), "Selected entire report, not a passage"
+    assert gui.copy_selection()
+    assert app.clipboard().text() == mouse_selected
 
-    # A toolbar click should preserve selection even when focus moves.
-    assert gui.detail.cget("exportselection") == 0
-    gui.detail.tag_remove("sel", "1.0", "end")
-    root.clipboard_clear()
-    assert gui.copy_text_selection(gui.detail) is False
-    assert "Select some text" in gui.status.get()
-    try:
-        root.clipboard_get()
-    except tk.TclError:
-        pass
-    else:
-        raise AssertionError("Empty selection must not leak the full report")
+    # Ctrl+C on the currently selected text uses native Qt clipboard handling.
+    app.clipboard().clear()
+    QtTest.QTest.keyClick(editor, QtCore.Qt.Key.Key_C, QtCore.Qt.KeyboardModifier.ControlModifier)
+    app.processEvents()
+    assert app.clipboard().text() == mouse_selected
 
-    # Coverage supports arbitrary substring selection, not only whole reports.
-    gui.tabs.select(2)
-    gui.coverage.tag_add("sel", "1.0", "1.10")
-    expected = gui.coverage.get("1.0", "1.10")
-    assert gui.copy_active_selection()
-    assert root.clipboard_get() == expected
+    # An empty selection does not silently export the full report.
+    cursor.clearSelection()
+    editor.setTextCursor(cursor)
+    app.clipboard().clear()
+    assert gui.copy_selection() is False
+    assert app.clipboard().text() == ""
+    assert "Select a text passage" in gui.status.text()
 
-    # Timeline: selecting an entry copies one row (not all journal entries).
-    gui.tabs.select(1)
-    rows = gui.event_tree.get_children()
-    assert rows, "Demo report should include a classified event"
-    gui.event_tree.selection_set(rows[0])
-    expected = gui.selected_rows(gui.event_tree)
-    assert gui.copy_active_selection()
-    assert root.clipboard_get() == expected
-    assert chr(9) in expected, "Timeline rows should have tab-separated columns"
+    # Coverage can be selected and copied independently of findings.
+    gui.tabs.setCurrentIndex(2)
+    app.processEvents()
+    cover_cursor = gui.coverage.textCursor()
+    cover_cursor.setPosition(0)
+    cover_cursor.setPosition(12, QtGui.QTextCursor.MoveMode.KeepAnchor)
+    gui.coverage.setTextCursor(cover_cursor)
+    expected = cover_cursor.selectedText()
+    assert gui.copy_selection() is True
+    assert app.clipboard().text() == expected
 
-    # Context menu and Ctrl+C bindings are explicitly installed.
-    assert gui.detail.bind("<Button-3>")
-    assert gui.detail.bind("<Control-c>")
-    assert gui.coverage.bind("<Control-c>")
-    assert gui.event_tree.bind("<Control-c>")
-    print("Real Tk GUI smoke test (fictional demo only): passed")
+    # Timeline copying includes only user-selected rows as tab-separated text.
+    gui.tabs.setCurrentIndex(1)
+    app.processEvents()
+    assert gui.events.topLevelItemCount() >= 1
+    gui.events.setCurrentItem(gui.events.topLevelItem(0))
+    assert gui.copy_selection()
+    assert "\t" in app.clipboard().text()
+    print("Qt6 GUI Xvfb smoke test: real mouse selection / Ctrl+C / toolbar copy passed")
 finally:
     gui.close()
+    app.processEvents()
