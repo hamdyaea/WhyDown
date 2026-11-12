@@ -53,6 +53,21 @@ class TestWhyDownGUI(unittest.TestCase):
         with self.assertRaises(ValueError):
             gui.build_command("whydown", max_events=5001)
 
+    def test_theme_preferences_and_palette_selection(self):
+        self.assertEqual(gui.THEMES, ("system", "light", "dark"))
+        self.assertEqual(gui.normalize_theme("garbage"), "system")
+        self.assertEqual(gui.normalize_theme(None), "system")
+        self.assertEqual(gui.resolve_theme("system", True), "dark")
+        self.assertEqual(gui.resolve_theme("system", False), "light")
+        self.assertEqual(gui.resolve_theme("dark", False), "dark")
+        self.assertEqual(gui.resolve_theme("light", True), "light")
+        self.assertEqual(gui.resolve_theme("invalid", True), "dark")
+        self.assertIn("QPlainTextEdit", gui.stylesheet_for("dark", False))
+        self.assertIn("#152338", gui.stylesheet_for("dark", False))
+        self.assertIn("#f2f6fb", gui.stylesheet_for("light", True))
+        self.assertEqual(gui.stylesheet_for("system", True), gui.DARK_STYLE)
+        self.assertEqual(gui.stylesheet_for("system", False), gui.LIGHT_STYLE)
+
     @staticmethod
     def fixture():
         return {
