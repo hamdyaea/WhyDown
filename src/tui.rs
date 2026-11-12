@@ -354,7 +354,7 @@ mod tests {
         let cli = Cli { tui_demo: true, ..Cli::default() };
         run_with_io(&mut input, &mut output, cli, false).unwrap();
         let transcript = String::from_utf8(output).unwrap();
-        for expected in ["Focus changed to network", "Lookback changed to 1h",
+        for expected in ["Focus changed to network", "Lookback changed to 7d",
             "Current boot filter enabled", "Journal cap changed to 10000",
             "No report for these settings yet"] {
             assert!(transcript.contains(expected), "Missing status: {expected}");
