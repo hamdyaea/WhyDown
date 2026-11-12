@@ -91,6 +91,16 @@ fn overwriting_report_replaces_it_and_keeps_private_permissions() {
 }
 
 #[test]
+fn collector_timings_are_json_safe_and_remote_mounts_are_opt_in() {
+    let result = whydown(&["demo", "--format", "json", "--include-remote-mounts"]);
+    assert!(result.status.success());
+    let report = String::from_utf8(result.stdout).unwrap();
+    assert!(report.contains("\"collector_timings\""));
+    assert!(report.contains("\"elapsed_ms\": 0"));
+    assert!(report.contains("\"name\": \"demo fixture\""));
+}
+
+#[test]
 fn forced_progress_uses_stderr_without_corrupting_json_stdout() {
     let result = whydown(&["demo", "--format", "json", "--progress"]);
     assert!(result.status.success());
