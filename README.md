@@ -5,19 +5,20 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.3.5 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.3.6 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
 - **Read-only by design:** never restarts services, changes configuration, installs packages, or escalates privileges.
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
-- **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM and storage errors.
+- **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM/storage errors, and incomplete dpkg package states on Debian-family distributions.
 - **Time-based correlation and per-interface incident windows:** groups nearby journal events separately for identified network interfaces and flags when link problems precede DNS failures; correlation does not prove causation.
 - **Source attribution (v0.3.0):** bounded program, interface or systemd unit identifiers from journal messages; no raw log bodies are retained.
 - **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
 - **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
 - **Service diagnostics (v0.3.1):** separate system/user systemd failed-unit snapshots, plus historical service-message windows that distinguish log entries from independent failures.
+- **Debian package integrity (v0.3.6):** read-only `dpkg-query` status check detects unpacked, half-configured, half-installed, trigger-awaiting/pending or reinstall-required packages independently of systemd. Does not run apt/dpkg repairs or claim to diagnose why a maintainer script failed.
 - **Audit false-positive filtering (v0.3.2):** sudo/doas/pkexec command audit records are no longer mistaken for failures simply because a grep pattern or command argument contains words such as "Failed to start". Historical service windows now indicate whether they predate the estimated current boot, based on uptime; this is an estimate, not a journal boot ID.
 - **Optional disk breakdown:** `--disk-details` uses `du` to list large subdirectories on up to two near-full non-root filesystems. No files are removed.
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
@@ -39,7 +40,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.5/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.6/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -101,7 +102,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.3.5
+VERSION=v0.3.6
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -181,7 +182,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.3.5
+./target/release/whydown --version   # expects whydown 0.3.6
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -249,7 +250,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.3.5 [DEMO]
+WhyDown 0.3.6 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -293,11 +294,26 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Failed services | `systemctl list-units --failed`, `systemctl --user list-units --failed` | Separately checks system and invoking-user managers; unavailable checks are marked unknown, not zero |
 | Historical service messages | Classified `journalctl` entries | Groups messages within five seconds into time windows; not a count of independently failed services |
 | Service journal events | `journalctl` | Classifies failure-like system messages |
+| dpkg package states (Debian-family) | `dpkg-query --show` against local package database | Warns about incompletely configured and reinstallation-required packages, not harmless residual configuration files; packages are only read, never configured |
 | Disk utilization | `df -PT` | Warns at >=90% for writable-capable filesystem types; excludes full-by-design compressed read-only images (SquashFS, EROFS, ISO 9660, CramFS) |
 | Optional disk details | `du -x -k --max-depth=2` | Read-only breakdown for up to two eligible near-full non-root mounts; may be slow or incomplete |
 | Memory pressure | `journalctl` | Detects OOM-related messages |
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |
+
+### Debian / Ubuntu package-manager diagnostics (v0.3.6)
+
+On dpkg-managed systems, `--focus system` and `--focus all` now check the package database with a read-only `dpkg-query` call. Broken/incomplete states appear as `DPKG_INCOMPLETE_PACKAGES` (current snapshot) with affected package names and states. A successful systemd check does **not** imply healthy packages.
+
+This rule is independent of `--since` (which limits journal entries), does not inspect historical APT transactions, and does not determine *why* package configuration failed. Missing/inaccessible dpkg tools are recorded as collection limitations rather than clean results. Debian 13 provided a real fixture: three `unpacked` packages and one `half-configured` kernel package.
+
+```bash
+whydown diagnose --focus system --since 24h
+dpkg --audit
+apt-get -s -f install  # simulation only; no changes
+```
+
+WhyDown **never executes** either `dpkg --configure -a` or `apt-get -f install`. Such commands can change the system and should be run only after inspecting the specific failure, especially for kernel packages.
 
 ### How confident are the diagnoses?
 
@@ -309,14 +325,14 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports and non-root user-service checks on this VM are still pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports on this VM are still pending; user-service diagnostics were subsequently checked successfully with the normal `hamdy` account (zero failed user units). The v0.3.6 dpkg rule has regression coverage based on the VM's four broken kernel packages; a live v0.3.6 retest on Debian 13 is pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.3.5 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.3.6 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Security and privacy
 
@@ -370,10 +386,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.3.3 (released):** correct singular/plural labels in diagnostics and reports without changing detection logic or JSON schema.
 - **v0.3.4 (released):** guided Linux x86_64/ARM64 installer with automatic ABI detection, SHA-256 verification, and optional source build/preflight help; Raspberry Pi OS guidance.
 - **v0.3.5 (released):** static musl by default, candidate compatibility checks before installing, and preservation of previous executables when installation fails.
+- **v0.3.6 (released):** detect incomplete Debian dpkg package states in system/all diagnostics, show safe investigation commands, and include findings in JSON/HTML reports.
 - **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.3.5: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.3.6: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 

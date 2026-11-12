@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, Event, EventKind, Focus, InterfaceStats, Snapshot};
+use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
 use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
@@ -67,6 +67,24 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
     }
 
     if focus.includes(Focus::System) {
+        // Read the package database via dpkg-query's stable, machine-readable
+        // status abbreviation. Do not invoke apt/dpkg configuration commands.
+        if fs::metadata("/var/lib/dpkg/status").is_ok() {
+            snapshot.dpkg_checked = Some(false);
+            match run_capture("dpkg-query",
+                &["--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\n"]) {
+                Ok((true, output)) => {
+                    let problems = parse_dpkg_status(&output);
+                    snapshot.dpkg_problem_count = problems.len();
+                    snapshot.dpkg_problems = problems.into_iter().take(50).collect();
+                    snapshot.dpkg_checked = Some(true);
+                }
+                Ok((false, _)) => snapshot.notes.push(
+                    "dpkg package status query failed; package health not verified".into()),
+                Err(_) => snapshot.notes.push(
+                    "dpkg status database found but dpkg-query unavailable; package health not verified".into()),
+            }
+        }
         match run_capture("df", &["-PT"]) {
             Ok((true, output)) => snapshot.disks = parse_df(&output),
             _ => snapshot.notes.push("Filesystem usage unavailable".into()),
@@ -205,6 +223,40 @@ pub fn parse_interfaces(content: &str) -> Vec<InterfaceStats> {
             tx_dropped: values[11],
         })
     }).collect()
+}
+
+/// Parse dpkg-query --showformat='${binary:Package}\\t${db:Status-Abbrev}\\n'.
+/// The 3-character status contains desired state, actual state, error flag.
+/// Ignore fully installed packages and harmless "config-files" leftovers.
+pub fn parse_dpkg_status(content: &str) -> Vec<DpkgProblem> {
+    let mut problems = Vec::new();
+    for line in content.lines() {
+        let Some((name, abbrev)) = line.split_once('\t') else { continue };
+        if name.is_empty() || name.len() > 128 ||
+            !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"+-.:_".contains(&b)) {
+            continue;
+        }
+        let bytes = abbrev.trim_end_matches('\r').as_bytes();
+        if bytes.len() != 3 { continue; }
+        let reinstall_required = bytes[2] == b'R';
+        let state = match bytes[1] {
+            b'H' => "half-installed",
+            b'U' => "unpacked",
+            b'F' => "half-configured",
+            b'W' => "triggers-awaited",
+            b't' => "triggers-pending",
+            _ if reinstall_required => "reinstallation-required",
+            _ => continue, // installed, config-files, not-installed
+        };
+        problems.push(DpkgProblem {
+            name: name.to_string(),
+            state: state.to_string(),
+            reinstall_required,
+        });
+    }
+    problems.sort_by(|a, b| a.name.cmp(&b.name));
+    problems.dedup_by(|a, b| a.name == b.name);
+    problems
 }
 
 pub fn parse_failed_units(content: &str) -> Vec<String> {
@@ -499,6 +551,33 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, EventKind::ServiceFailure);
         assert_eq!(events[0].subject.as_deref(), Some("rclone-onedrive.service"));
+    }
+
+    #[test]
+    fn dpkg_audit_states_from_debian13_kernel_failure() {
+        let text = "linux-headers-6.12.116+deb13-amd64\tiU \n\
+linux-headers-amd64\tiU \n\
+linux-image-amd64\tiU \n\
+linux-image-6.12.116+deb13-amd64\tiF \n\
+bash\tii \n\
+residual-config\trc \n\
+held-installed\thi \n\
+half-installed\tiH \n\
+need-reinstall\tiHR\n\
+trigger-unit\tit \n\
+trigger-await\tiW \n";
+        let found = parse_dpkg_status(text);
+        assert_eq!(found.len(), 8, "only non-installed / broken states should be retained");
+        assert!(found.iter().any(|p| p.name == "linux-image-6.12.116+deb13-amd64" && p.state == "half-configured"));
+        assert!(found.iter().any(|p| p.name == "linux-headers-amd64" && p.state == "unpacked"));
+        assert!(found.iter().any(|p| p.name == "need-reinstall" && p.reinstall_required));
+        assert!(!found.iter().any(|p| p.name == "residual-config" || p.name == "bash" || p.name == "held-installed"));
+    }
+
+    #[test]
+    fn dpkg_query_ignores_invalid_or_inapplicable_states() {
+        let text = "pkg\tii \nremoved\trc \nnotinstalled\tun \nunknown\t?? \nnot-a-record\n";
+        assert!(parse_dpkg_status(text).is_empty());
     }
 
     #[test]

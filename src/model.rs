@@ -39,7 +39,7 @@ impl Finding {
         match self.id {
             "ROUTE_MISSING" | "IPV4_ROUTE_MISSING" | "DNS_UNCONFIGURED"
             | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS" | "FAILED_USER_SYSTEMD_UNITS"
-            | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" => "current_snapshot",
+            | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" | "DPKG_INCOMPLETE_PACKAGES" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" => "unverified",
             _ => "historical_journal",
         }
@@ -221,6 +221,14 @@ pub struct ServiceEventWindow {
     pub units: Vec<String>,
 }
 
+/// One package that is not fully configured in the local dpkg status database.
+#[derive(Debug, Clone)]
+pub struct DpkgProblem {
+    pub name: String,
+    pub state: String,
+    pub reinstall_required: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
@@ -236,6 +244,12 @@ pub struct Snapshot {
     pub system_units_checked: bool,
     /// None when the user's systemd manager is inaccessible.
     pub failed_user_units: Option<Vec<String>>,
+    /// None: dpkg status database absent (not a dpkg-managed system).
+    /// Some(false): database present, but query failed; Some(true): queried.
+    pub dpkg_checked: Option<bool>,
+    /// Total number before the display cap.
+    pub dpkg_problem_count: usize,
+    pub dpkg_problems: Vec<DpkgProblem>,
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
@@ -257,6 +271,9 @@ impl Default for Snapshot {
             failed_units: Vec::new(),
             system_units_checked: false,
             failed_user_units: None,
+            dpkg_checked: None,
+            dpkg_problem_count: 0,
+            dpkg_problems: Vec::new(),
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
