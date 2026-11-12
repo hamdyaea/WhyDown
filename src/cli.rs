@@ -37,6 +37,10 @@ pub struct Cli {
     pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub disk_details: bool,
+    /// Restrict journal observations to the currently running Linux boot.
+    pub current_boot: bool,
+    /// For automation: exit with status 1 when a warning is present.
+    pub exit_on_warning: bool,
 }
 
 impl Default for Cli {
@@ -50,6 +54,8 @@ impl Default for Cli {
             output: None,
             overwrite: false,
             disk_details: false,
+            current_boot: false,
+            exit_on_warning: false,
         }
     }
 }
@@ -88,6 +94,16 @@ impl Cli {
             }
             if flag == "--disk-details" {
                 cli.disk_details = true;
+                i += 1;
+                continue;
+            }
+            if flag == "--current-boot" || flag == "--since-boot" {
+                cli.current_boot = true;
+                i += 1;
+                continue;
+            }
+            if flag == "--exit-on-warning" {
+                cli.exit_on_warning = true;
                 i += 1;
                 continue;
             }
@@ -165,6 +181,8 @@ OPTIONS
   --focus VALUE    all | network | services | system (default: all)
   --since VALUE    journal lookback: 30m | 24h | 7d (default: 24h)
   --max-events N   maximum journal entries examined (default: 500)
+  --current-boot   restrict journal observations to the current boot
+  --exit-on-warning  exit with code 1 if any WARNING was found (default: 0)
   --format VALUE   text | json | html (default: text)
   --output FILE    write report to a new file (use --overwrite to replace)
   --overwrite      allow replacing an existing output file
@@ -173,7 +191,8 @@ OPTIONS
   -V, --version    display version
 
 EXAMPLES
-  whydown diagnose --focus network --since 2h
+  whydown diagnose --focus network --since 2h --current-boot
+  whydown diagnose --focus system --exit-on-warning
   whydown diagnose --focus system --disk-details
   whydown diagnose --format json --output report.json
   whydown diagnose --format html --output report.html
@@ -181,6 +200,8 @@ EXAMPLES
 
 Read-only. Offline. No root required (journal access may be limited).
 Reports are diagnostic hints, not proof of a root cause.
+Exit codes: 0 = command completed, 1 = warning found with --exit-on-warning,
+2 = invocation or output error. Collection limitations do not mean healthy.
 "#;
 
 #[cfg(test)]
@@ -201,6 +222,18 @@ mod tests {
         assert_eq!(c.format, OutputFormat::Json);
         assert_eq!(c.focus, Focus::Network);
         assert_eq!(c.since_seconds, 5400);
+    }
+
+    #[test]
+    fn journal_scope_and_monitoring_exit_flags() {
+        let c = Cli::parse(["diagnose", "--current-boot", "--exit-on-warning"]).unwrap();
+        assert!(c.current_boot);
+        assert!(c.exit_on_warning);
+        let alias = Cli::parse(["--since-boot"]).unwrap();
+        assert!(alias.current_boot);
+        let defaults = Cli::default();
+        assert!(!defaults.current_boot);
+        assert!(!defaults.exit_on_warning);
     }
 
     #[test]
