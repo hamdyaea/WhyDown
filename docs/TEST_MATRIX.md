@@ -1,12 +1,12 @@
 # Cross-distribution validation matrix
 
-**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware.
+**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were also manually exercised with v0.3.5 as root; user-manager, exports and APT/dpkg diagnostics remain incomplete.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
 | Manjaro | x86_64 | Tested through v0.3.3; retest v0.3.5 installer | NetworkManager, XFS /var, pacman cache, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
-| Debian VM | x86_64 | Planned | systemd, DHCP, small VM disk |
+| Debian 13 (Trixie) VM | x86_64 | **Partially validated on v0.3.5**: static-musl installation and `--focus all/network/services/system` text reports run under root; user systemd unverified, JSON/HTML not yet checked | systemd, DHCP, APT/dpkg packaging, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
 | Ubuntu Server | x86_64 or aarch64 | Planned | headless services, journal permissions |
 | Kali Purple VM | x86_64 | Planned | nonstandard service log formats |
@@ -55,3 +55,13 @@ The WhyDown v0.3.4 ARM64 GNU archive downloaded and passed its checksum on Raspb
 - Current systemd results: two failed system units and one failed user unit, consistent with prior source-built runs.
 - The tested installer did not invoke Cargo, but Rust/Cargo were present on the test host. This is not a test on a Rust-free installation.
 - Other CPU/kernel combinations, all feature areas, and other Linux distributions remain outside this manual validation.
+
+## Manual validation record — Debian 13 (Trixie) x86_64 VM (2026-11-12)
+
+- Distribution: Debian GNU/Linux 13 (Trixie), kernel `6.12.115+deb13.1-amd64` in screenshots.
+- Installer: under a **root shell**, automatic target `x86_64-unknown-linux-musl`, `--dry-run`, download and successful SHA-256 verification; installed under `/root/.local/bin/whydown`. `--version` reported `whydown 0.3.5`.
+- Successful read-only text report execution: `--focus all`, `network`, `services`, and `system`, using `--since 24h --max-events 5000`. Each returned `NO_CLASSIFIED_ANOMALY`; this is a rule-match result, **not system health certification**.
+- Network snapshot: local IPv4 and IPv6 default routes present, `enp0s3` kernel operstate `up`; neither demonstrates internet connectivity.
+- Systemd: zero failed system units at snapshot; root user's systemd manager unavailable, correctly reported as `not checked`. The normal user's manager was not tested.
+- A prior `dpkg` command reportedly exited with code 1 during a kernel package operation. This **was not detected** by WhyDown's current rules; it does not currently inspect APT/dpkg transaction failures or unfinished package configurations. Collect `dpkg --audit` and `apt-get -s -f install` in the VM to investigate separately, without automatic repair.
+- Not yet manually verified on this VM: diagnostics as unprivileged user, JSON schema-v2/HTML output, representative real network/storage failures, or all available journal entries.
