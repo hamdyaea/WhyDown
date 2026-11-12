@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub enum Command {
     Diagnose,
     Demo,
+    Tui,
     Help,
     Version,
 }
@@ -31,6 +32,8 @@ impl OutputFormat {
 #[derive(Debug, Clone)]
 pub struct Cli {
     pub command: Command,
+    /// Only for `tui --demo`: generate a fictional report without reading the host.
+    pub tui_demo: bool,
     pub focus: Focus,
     pub since_seconds: u64,
     pub max_events: usize,
@@ -51,6 +54,7 @@ impl Default for Cli {
     fn default() -> Self {
         Self {
             command: Command::Diagnose,
+            tui_demo: false,
             focus: Focus::All,
             since_seconds: 86_400,
             max_events: 5_000,
@@ -80,6 +84,7 @@ impl Cli {
                 cli.command = match first.as_str() {
                     "diagnose" | "doctor" => Command::Diagnose,
                     "demo" => Command::Demo,
+                    "tui" => Command::Tui,
                     "help" => Command::Help,
                     "version" => Command::Version,
                     _ => return Err(format!("Unknown command: {first}")),
@@ -97,6 +102,18 @@ impl Cli {
             if flag == "--version" || flag == "-V" {
                 cli.command = Command::Version;
                 return Ok(cli);
+            }
+            if flag == "--demo" {
+                if cli.command != Command::Tui {
+                    return Err("--demo is supported only by 'whydown tui'; use 'whydown demo' otherwise".into());
+                }
+                cli.tui_demo = true;
+                i += 1;
+                continue;
+            }
+            if cli.command == Command::Tui &&
+                matches!(flag, "--format" | "--output" | "--overwrite" | "--exit-on-warning" | "--progress" | "--no-progress") {
+                return Err(format!("{flag} is not supported in interactive TUI mode; use 'whydown diagnose' or 'whydown demo' for reports/automation"));
             }
             if flag == "--disk-details" {
                 cli.disk_details = true;
@@ -190,15 +207,19 @@ pub const HELP: &str = r#"WhyDown — evidence-based Linux troubleshooting
 USAGE
   whydown [diagnose] [OPTIONS]
   whydown demo [OPTIONS]
+  whydown tui [OPTIONS]
+  whydown tui --demo
   whydown --help
 
 COMMANDS
   diagnose         Inspect the local Linux system (default)
   demo             Show a safe, deterministic example (no system inspection)
+  tui              Interactive evidence browser (requires a terminal)
   help             Show this help
   version          Show program version
 
 OPTIONS
+  --demo           TUI only: browse fictional evidence, no system inspection
   --focus VALUE    all | network | services | system (default: all)
   --since VALUE    journal lookback: 30m | 24h | 7d (default: 24h)
   --max-events N   maximum journal entries examined (default: 5000; max: 10000)
@@ -222,6 +243,8 @@ EXAMPLES
   whydown diagnose --format json --output report.json
   whydown diagnose --format html --output report.html
   whydown demo --format html --output example.html
+  whydown tui --focus all --since 4h --current-boot
+  whydown tui --demo
 
 Read-only. Offline. No root required (journal access may be limited).
 Reports are diagnostic hints, not proof of a root cause.
@@ -232,6 +255,30 @@ Exit codes: 0 = command completed, 1 = warning found with --exit-on-warning,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tui_parsing_and_output_safety() {
+        let tui = Cli::parse(["tui", "--demo", "--focus", "services", "--since", "4h",
+            "--current-boot", "--max-events", "10000"]).unwrap();
+        assert_eq!(tui.command, Command::Tui);
+        assert!(tui.tui_demo);
+        assert_eq!(tui.focus, Focus::Services);
+        assert_eq!(tui.since_seconds, 14_400);
+        assert!(tui.current_boot);
+        assert_eq!(tui.max_events, 10_000);
+        assert!(Cli::parse(["diagnose", "--demo"]).is_err());
+        for invalid in ["--format", "--output", "--overwrite", "--progress",
+            "--no-progress", "--exit-on-warning"] {
+            let args = if invalid == "--format" {
+                vec!["tui", "--format", "json"]
+            } else if invalid == "--output" {
+                vec!["tui", "--output", "report.json"]
+            } else {
+                vec!["tui", invalid]
+            };
+            assert!(Cli::parse(args).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn defaults() {
