@@ -50,9 +50,19 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
 
     if focus.includes(Focus::Services) {
         match run_capture("systemctl", &["list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
-            Ok((true, output)) => snapshot.failed_units = parse_failed_units(&output),
+            Ok((true, output)) => {
+                snapshot.failed_units = parse_failed_units(&output);
+                snapshot.system_units_checked = true;
+            },
             Ok((false, _)) => snapshot.notes.push("Failed systemd units unavailable (systemd may be absent or inaccessible)".into()),
             Err(_) => snapshot.notes.push("systemctl is not available".into()),
+        }
+        // User and system units belong to separate systemd managers.
+        // A missing user bus means unknown, not zero failed user units.
+        match run_capture("systemctl", &["--user", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
+            Ok((true, output)) => snapshot.failed_user_units = Some(parse_failed_units(&output)),
+            Ok((false, _)) => snapshot.notes.push("User systemd manager unavailable; user units not checked".into()),
+            Err(_) => snapshot.notes.push("systemctl --user unavailable; user units not checked".into()),
         }
     }
 

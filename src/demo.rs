@@ -18,6 +18,8 @@ pub fn snapshot() -> Snapshot {
             name: "wlan0".into(), operstate: Some("up".into()), rx_errors: 0, rx_dropped: 1, tx_errors: 0, tx_dropped: 0,
         }],
         failed_units: vec!["example-backup.service".into()],
+        system_units_checked: true,
+        failed_user_units: Some(vec![]),
         disks: vec![DiskUsage { mountpoint: "/".into(), used_percent: 64 }],
         disk_breakdowns: vec![],
         events: vec![

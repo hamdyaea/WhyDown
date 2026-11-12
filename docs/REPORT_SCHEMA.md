@@ -31,3 +31,13 @@ The engine never probes network endpoints and does not monitor continuously.
 Only short, ASCII-validated program, network-interface or systemd-unit identifiers are extracted from matching journal entries. No raw journal line is kept. The output may nevertheless contain mountpoints, names of local units/interfaces and other configuration identifiers; review before sharing.
 
 Do not silently parse schema 2 as schema 1. For distribution comparisons, use finding IDs, scopes, summaries and limitations rather than timestamps or hostnames.
+
+
+## Additions in WhyDown v0.3.1 (schema still 2)
+
+- `system.system_units_checked`: boolean; false means the system manager was not checked successfully.
+- `system.failed_user_units`: array of currently failed unit names from the **invoking user's** manager, or `null` if that manager could not be queried. An empty array means the query succeeded and found no failed units.
+- `service_event_windows`: historical five-second journal message clusters, each with `start`, `end`, `entry_count`, `unattributed_entries`, `units`, and `status`. **A cluster is not an independent failed-service count.**
+- `findings[].id=FAILED_USER_SYSTEMD_UNITS` signals current user-unit failures; `SERVICE_FAILURE_LOGS` remains a historical journal observation.
+
+A service that exited with code 1 may have automatically restarted, and a SIGTERM signal may occur during shutdown. Check the surrounding journal and the present system/user manager states before interpreting these observations. Reports never establish that a service is currently stopped simply because it failed historically.
