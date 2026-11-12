@@ -71,6 +71,20 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
     }
 
     if focus.includes(Focus::System) {
+        // pacman -Dk checks local package database consistency without any
+        // sync/installation/removal, and only when pacman's DB is present.
+        if fs::metadata("/var/lib/pacman/local").is_ok() {
+            snapshot.pacman_checked = Some(false);
+            match run_capture("pacman", &["-Dk"]) {
+                Ok((success, _)) => {
+                    snapshot.pacman_checked = Some(true);
+                    snapshot.pacman_consistent = Some(success);
+                }
+                Err(error) => snapshot.notes.push(format!(
+                    "pacman local database consistency not verified: {error}"
+                )),
+            }
+        }
         // Read the package database via dpkg-query's stable, machine-readable
         // status abbreviation. Do not invoke apt/dpkg configuration commands.
         if fs::metadata("/var/lib/dpkg/status").is_ok() {
