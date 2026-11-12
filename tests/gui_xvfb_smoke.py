@@ -5,8 +5,10 @@ copying does not include unselected diagnostic details. No network or host
 journal access; uses the same embedded GUI module as the shipped binary.
 """
 import importlib.util
+import os
 import pathlib
 import sys
+import tempfile
 import time
 
 from PyQt6 import QtCore, QtGui, QtTest, QtWidgets
@@ -18,12 +20,60 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 binary = pathlib.Path(sys.argv[1]).resolve()
 assert binary.is_file()
+# Never read/write the runner's persistent desktop preferences.
+test_settings = tempfile.TemporaryDirectory(prefix="whydown-qt-theme-")
+os.environ["XDG_CONFIG_HOME"] = test_settings.name
 app = QtWidgets.QApplication(["WhyDown GUI test"])
 args = mod.parse_args(["--whydown-bin", str(binary), "--demo", "--current-boot"])
 gui = mod.WhyDownGUI(args)
 gui.show()
 app.processEvents()
 try:
+    assert gui.theme_box.currentText() == "System"
+    initial_theme = gui.effective_theme
+    assert initial_theme in ("light", "dark")
+
+    # Manual choice changes every themed widget and persists across launch.
+    gui.theme_box.setCurrentText("Dark")
+    app.processEvents()
+    assert gui.theme_preference == "dark"
+    assert gui.effective_theme == "dark"
+    assert "#152338" in gui.styleSheet()
+    assert gui.detail.isReadOnly() and gui.detail.isEnabled()
+    assert QtCore.QSettings("WhyDown", "WhyDown").value("appearance/theme") == "dark"
+
+    reopened = mod.WhyDownGUI(args)
+    assert reopened.theme_box.currentText() == "Dark"
+    assert reopened.effective_theme == "dark"
+    reopened.close()
+    app.processEvents()
+
+    gui.theme_box.setCurrentText("Light")
+    app.processEvents()
+    assert gui.theme_preference == "light"
+    assert gui.effective_theme == "light"
+    assert "#f2f6fb" in gui.styleSheet()
+    assert "#152338" not in gui.styleSheet()
+
+    # System setting follows platform changes without overwriting preference.
+    gui.theme_box.setCurrentText("System")
+    app.processEvents()
+    assert gui.theme_preference == "system"
+    detector = mod.system_prefers_dark
+    try:
+        mod.system_prefers_dark = lambda _app: True
+        gui._system_theme_changed()
+        assert gui.effective_theme == "dark"
+        mod.system_prefers_dark = lambda _app: False
+        gui._system_theme_changed()
+        assert gui.effective_theme == "light"
+        assert gui.theme_preference == "system"
+        assert QtCore.QSettings("WhyDown", "WhyDown").value("appearance/theme") == "system"
+    finally:
+        mod.system_prefers_dark = detector
+    gui._system_theme_changed()
+    assert gui.effective_theme == initial_theme
+
     assert gui.focus.currentText() == "all"
     assert gui.since.currentText() == "4h"
     assert gui.cap.currentText() == "10000"
@@ -102,3 +152,4 @@ try:
 finally:
     gui.close()
     app.processEvents()
+    test_settings.cleanup()
