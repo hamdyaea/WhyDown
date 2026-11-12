@@ -1,8 +1,8 @@
 //! Optional offline desktop interface built on the existing Rust diagnostics.
 //!
-//! The Python/Tkinter GUI is embedded directly into each WhyDown binary.
+//! The Python/PyQt6 GUI is embedded directly into each WhyDown binary.
 //! Releasing the CLI still requires no Python dependency; desktop users opt in
-//! to Python 3 + Tk at runtime. No shell invocation, file write or network use.
+//! to Python 3 + Qt 6 (PyQt6) at runtime. No shell invocation, file write or network use.
 
 use crate::cli::Cli;
 use std::process::Command;
@@ -47,7 +47,7 @@ pub fn run(cli: Cli) -> Result<u8, String> {
     }
     let status = launcher.status().map_err(|e| {
         format!("Cannot launch graphical WhyDown: {e}. \
-                 Install Python 3 with Tkinter, or use 'whydown tui'.")
+                 Install Python 3 and PyQt6, or use 'whydown tui'.")
     })?;
     Ok(if status.success() { 0 } else { 2 })
 }
@@ -69,7 +69,9 @@ mod tests {
     fn script_is_embedded_and_has_no_external_fetch() {
         let script = include_str!("../scripts/whydown_gui.py");
         assert!(script.contains("def build_command"));
-        assert!(script.contains("subprocess.Popen"));
+        assert!(script.contains("QtCore.QProcess"));
         assert!(script.contains("class WhyDownGUI"));
+        assert!(script.contains("setReadOnly(True)"));
+        assert!(script.contains("TextSelectableByMouse"));
     }
 }
