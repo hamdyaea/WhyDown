@@ -143,3 +143,9 @@ No raw journal entries, Wi-Fi BSSIDs, USB serial numbers, UFW source/destination
 ### Correlation timing precision (post-v0.7.0)
 
 Journal events are retained as integer Unix seconds; subsecond ordering is not stored. If a Wi-Fi deauthentication/link event and association have identical timestamps, the report may note their co-occurrence, but **must not describe one as following the other** or claim verified recovery. Strictly later-second associations can be described as subsequent observations, still without proving connectivity. The `USB_DISCONNECT_BURST` count is the count of distinct topology paths, not the number of independent hardware faults or physical devices.
+
+## Unreleased: targeted systemd unit snapshots (schema remains 2)
+
+When the journal includes an attributable systemd service failure and service focus is enabled, WhyDown optionally performs read-only, time-bounded `systemctl show` requests for up to four validated system-unit identifiers. The additive `system.service_statuses` array contains objects with `unit`, `load_state`, `active_state`, `sub_state`, `result` and `n_restarts` (nullable integer). An empty array does **not** mean the failed service is healthy; it can mean no attributable units, unavailable systemd, an unsupported/unloaded unit, or no successful query. User-manager units are not queried in this system-manager feature.
+
+A current `active_state=active` plus `sub_state=running` can support the statement that systemd considers the service running **at collection time**. Even together with a past failure and a scheduled restart, it does not verify application health, user-session function, or uninterrupted service availability. Historical `SERVICE_FAILURE_LOGS` warnings remain historical observations. The `SERVICE_RESTART_OBSERVED` finding includes current unit status only when successfully collected, and may otherwise stay limited confidence.
