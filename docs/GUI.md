@@ -156,3 +156,12 @@ release CI both run the test.
 After installing the released executable, real-world Manjaro and Debian
 desktop compatibility should still be confirmed, particularly on Wayland
 compositors and external clipboard managers.
+
+## Official branding (v0.10.3)
+
+WhyDown now uses the selected WD monogram and descending diagnostic graph.
+The same PNG is embedded in the Rust binary, loaded into the Qt window
+icon and sidebar, and installed in the user's XDG hicolor icon theme
+when the desktop launcher is explicitly requested.
+The GitHub wordmark is assets/whydown-logo.svg.
+Headless usage can display a matching plain ASCII logo with whydown logo.
