@@ -33,6 +33,9 @@ fn json_output_has_schema_fields() {
     assert!(output.contains("\"service_event_windows\""));
     assert!(output.contains("\"failed_user_units\""));
     assert!(output.contains("\"system_units_checked\""));
+    assert!(output.contains("\"dpkg_checked\": true"));
+    assert!(output.contains("\"dpkg_problem_count\": 1"));
+    assert!(output.contains("\"DPKG_INCOMPLETE_PACKAGES\""));
     assert!(output.contains("\"boot_relation\""));
     assert!(output.contains("\"timeline\""));
     assert!(output.contains("\"historical_journal\""));
