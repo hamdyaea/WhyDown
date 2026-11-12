@@ -643,6 +643,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
     // A group of USB detachments in 30 seconds may represent a single hub
     // unplugging; do not treat every child as an independent hardware fault.
     let usb: Vec<&Event> = events.iter().filter(|e| e.kind == EventKind::UsbDisconnect).collect();
+    let mut usb_burst_reported = false;
     for start in usb.iter().take(64) {
         let affected: std::collections::HashSet<String> = usb.iter()
             .filter(|e| e.timestamp >= start.timestamp && e.timestamp - start.timestamp <= 30)
@@ -656,6 +657,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
                 && e.timestamp.abs_diff(start.timestamp) <= 30) {
                 evidence.push("A nearby Realtek r8152 USB transport error was observed".into());
             }
+            usb_burst_reported = true;
             findings.push(Finding {
                 id: "USB_DISCONNECT_BURST",
                 severity: Severity::Warning,
@@ -670,6 +672,20 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
             });
             break;
         }
+    }
+    if !usb_burst_reported && count(events, EventKind::UsbTransportError) > 0 {
+        findings.push(Finding {
+            id: "USB_TRANSPORT_STATUS",
+            severity: Severity::Info,
+            confidence: Confidence::Observed,
+            title: "USB network adapter reported a transport-status error".into(),
+            explanation: "The r8152 USB adapter reported status -71 while submitting an interrupt transfer. This can occur during a disconnect or reset and is not proof of a defective adapter.".into(),
+            evidence: vec![format!(
+                "{} classified r8152 transport status observation(s)",
+                count(events, EventKind::UsbTransportError)
+            )],
+            checks: vec!["Review surrounding USB hub/dock power and kernel logs if the adapter remains unavailable".into()],
+        });
     }
 
     for (kind, id, title, explain, check) in [
@@ -754,6 +770,37 @@ mod tests {
         ];
         assert!(nearby_matching_subjects(&events,
             EventKind::LinkDown, EventKind::WifiAssociated, 30).is_none());
+    }
+
+    #[test]
+    fn usb_burst_requires_four_unique_ports_in_one_window() {
+        let e = |timestamp, port: &str| Event {
+            timestamp,
+            kind: EventKind::UsbDisconnect,
+            subject: Some(port.into()),
+            source: Some("kernel".into()),
+        };
+        let report = analyze(Snapshot {
+            events: vec![e(100,"1-1"),e(101,"1-1.1"),e(102,"1-1.2")],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        assert!(!report.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"));
+        let distant = analyze(Snapshot {
+            events: vec![e(100,"1-1"),e(101,"1-1.1"),e(102,"1-1.2"),e(200,"1-1.3")],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        assert!(!distant.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"));
+    }
+
+    #[test]
+    fn isolated_r8152_transport_status_is_info_not_hardware_fault() {
+        let report = analyze(Snapshot {
+            events: vec![Event {timestamp: 100,kind: EventKind::UsbTransportError,
+                subject: Some("1-1.2".into()),source: Some("kernel".into())}],
+            ..Snapshot::default()
+        },3600,Focus::System,false);
+        let finding=report.findings.iter().find(|f|f.id=="USB_TRANSPORT_STATUS").unwrap();
+        assert_eq!(finding.severity,Severity::Info);
     }
 
     #[test]
