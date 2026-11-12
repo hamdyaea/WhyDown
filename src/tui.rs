@@ -186,6 +186,9 @@ fn heading<W: Write>(out: &mut W, clear: bool, page: &str) -> io::Result<()> {
     } else {
         writeln!(out, "\n{}", "=".repeat(64))?;
     }
+    if page == "Dashboard" {
+        write!(out, "{}", crate::brand::ASCII_LOGO)?;
+    }
     writeln!(out, "WhyDown {}  |  Interactive terminal  |  {}", env!("CARGO_PKG_VERSION"), page)?;
     writeln!(out, "{}", "-".repeat(64))?;
     Ok(())
