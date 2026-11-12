@@ -6,7 +6,7 @@ WhyDown detects common system, network, storage and service incidents from
 local Linux state and journals. Examine findings through a desktop GUI, a
 guided terminal menu or the command line.
 
-![WhyDown Qt6 GUI in Dark mode — anonymized example data](docs/images/whydown-gui-dark.webp)
+![WhyDown Qt6 GUI in Dark mode — anonymized example data](docs/images/whydown-gui-dark.jpg)
 
 *Qt 6 desktop GUI. Screenshot uses anonymized example evidence.*
 
