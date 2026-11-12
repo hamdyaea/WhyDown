@@ -57,21 +57,34 @@ pub fn run_with_io<R: BufRead, W: Write>(
                 writeln!(output, "Last diagnostic: {warnings} warning(s), {info} info finding(s); {} journal entries{}",
                     report.snapshot.journal_entries_examined,
                     if report.snapshot.journal_truncated { " [PARTIAL]" } else { "" })?;
-                writeln!(output, "Current local evidence is a snapshot; historical warnings may have recovered.")?;
+                writeln!(output, "RESULTS — latest findings (historical observations may have recovered):")?;
+                if report.findings.is_empty() {
+                    writeln!(output, "  No classified findings; this does not prove system health.")?;
+                }
+                for finding in report.findings.iter().take(5) {
+                    writeln!(output, "  [{}] {}", finding.severity.as_str(), safe(&finding.title))?;
+                }
+                if report.findings.len() > 5 {
+                    writeln!(output, "  ... and {} more", report.findings.len() - 5)?;
+                }
+                writeln!(output, "NEXT STEP: Choose 6 to inspect explanations and evidence.")?;
             }
-            None => writeln!(output, "No report for these settings yet. Select 1 to run a diagnostic.")?,
+            None => {
+                writeln!(output, "START HERE: press 1 + Enter to analyze the whole system.")?;
+                writeln!(output, "NEXT STEP: the finding summary appears here; option 6 opens the evidence.")?;
+            }
         }
-        writeln!(output, "\n  1  Run diagnostic")?;
+        writeln!(output, "\n  1  START HERE: Run diagnostic (all checks recommended)")?;
         writeln!(output, "  2  Change focus")?;
         writeln!(output, "  3  Change journal lookback")?;
         writeln!(output, "  4  Toggle current-boot filter")?;
         writeln!(output, "  5  Toggle journal entry cap (5000 / 10000)")?;
-        writeln!(output, "  6  Browse findings and evidence")?;
+        writeln!(output, "  6  Explain findings and show evidence (after analysis)")?;
         writeln!(output, "  7  Recent classified timeline")?;
         writeln!(output, "  8  Coverage and limitations")?;
         writeln!(output, "  9  Copyable safe export commands")?;
         writeln!(output, "  0  Quit")?;
-        writeln!(output, "\nChoose a number and press Enter. Options 2-5 require option 1 to refresh.")?;
+        writeln!(output, "\nType a menu number and press Enter. Change scope with 2-5; re-run 1 after changes.")?;
         let selected = match pending_selection.take() {
             Some(next) => Some(next),
             None => choice(input, output, "Selection (number + Enter)")?,
