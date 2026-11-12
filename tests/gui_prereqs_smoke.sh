@@ -41,7 +41,7 @@ grep -q 'No packages were installed or changed' "$temp/no-tk.txt"
 
 FAKE_QT_MODE=ok PATH="$temp/bin" /bin/sh scripts/install.sh --check-gui-prereqs >"$temp/ok.txt"
 grep -q 'GUI dependency OK: Python 3 available' "$temp/ok.txt"
-grep -q 'GUI dependency OK: PyQt6 import succeeded' "$temp/ok.txt"
+grep -q 'GUI dependency OK: PyQt6 QtWidgets import succeeded' "$temp/ok.txt"
 grep -q 'GUI dependencies available' "$temp/ok.txt"
 
 # Missing GUI dependencies cannot prevent an ordinary, read-only dry-run.
