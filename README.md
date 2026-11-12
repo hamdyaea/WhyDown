@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.3.3 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.3.4 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -23,18 +23,41 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
 - **Three output formats:** human-readable terminal output, machine-readable JSON, self-contained HTML.
 - **Demo mode:** show a fictional incident without reading any local system information.
-- **Linux x86_64 / ARM64:** release archives for GNU/glibc and musl targets. Linux distributions differ; successful CI compilation does not guarantee every distribution has been tested.
+- **Linux x86_64 / ARM64:** GNU/glibc and musl release archives, plus a guided non-root binary installer that does not need Rust or Cargo. Linux distributions still require real-world testing.
 
 ## Quick start
 
 ### Requirements
 
 - Linux (for actual system diagnostics; demo mode also works elsewhere)
-- Rust 1.70 or newer and Cargo (build-time only)
+- Rust 1.70 or newer and Cargo (**only if compiling from source**; not required for the prebuilt binary)
 - `journalctl` and `systemctl` for journal/systemd checks (optional; missing commands are reported)
 - `df` for filesystem checks (optional)
 
-### Download a prebuilt Linux binary (no Rust required)
+### Recommended: guided installer (no Rust/Cargo required)
+
+On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo):
+
+```bash
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.4/scripts/install.sh -o whydown-install.sh
+less whydown-install.sh
+sh whydown-install.sh
+~/.local/bin/whydown --version
+~/.local/bin/whydown demo
+```
+
+If you have already cloned the repository:
+
+```bash
+cd ~/WhyDown
+git pull --ff-only
+sh scripts/install.sh --dry-run       # inspect target, binary URL, destination
+sh scripts/install.sh                 # verify SHA-256 and install under ~/.local/bin
+```
+
+The installer selects Linux x86_64 or ARM64 and detects GNU libc or musl. It downloads the matching release archive and SHA-256 checksum and verifies the archive **before extraction**. It requires no Rust/Cargo, root access, or modification to system services. It does download files from GitHub; WhyDown itself remains offline. Checksums show download integrity, **not a cryptographic publisher signature**. Use `--libc gnu|musl` to override detection, `--prefix /absolute/path` to choose the destination, and `--help` for all options.
+
+### Manual download of prebuilt Linux binary (no Rust required)
 
 Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/releases) for your CPU architecture and preferred C runtime.
 
@@ -46,7 +69,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.3.3
+VERSION=v0.3.4
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -61,7 +84,34 @@ tar -xzf "${ARCHIVE}"
 
 The SHA-256 checksum helps verify download integrity; it is **not a cryptographic signature**. Archives also contain this README and the GPLv3 license. No root privileges are required to extract or run the demo.
 
-### Build from source
+### Build from source (only if Rust and Cargo are wanted)
+
+Rust and Cargo are **not** required to run WhyDown. For a source build on Debian 12, Raspberry Pi OS or Ubuntu, install system build tools:
+
+```bash
+sudo apt update
+sudo apt install build-essential curl git ca-certificates
+```
+
+To install a sufficiently recent Rust toolchain and Cargo, follow the official [rustup instructions](https://rustup.rs/). Some Debian releases include an older rustc in APT than this project's minimum 1.70. After rustup installation or an update:
+
+```bash
+. "$HOME/.cargo/env"
+rustc --version
+cargo --version
+cc --version
+```
+
+The rustup message `Rust is installed now. Great!` confirms success. `Updating existing toolchain` is informational; `cargo:rerun-if-env-changed=...` and `CC_... = None` are normal build-script diagnostics, **not errors by themselves**. If `cargo` is missing after rustup, reopen the shell or source `$HOME/.cargo/env`; look for the actual `error:` line if a build fails.
+
+For a cloned WhyDown repository, check prerequisites and optionally build/install locally without downloading a binary:
+
+```bash
+sh scripts/install.sh --check-build-prereqs
+sh scripts/install.sh --from-source
+```
+
+Or compile manually:
 
 ```bash
 git clone https://github.com/hamdyaea/WhyDown.git
@@ -99,7 +149,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.3.3
+./target/release/whydown --version   # expects whydown 0.3.4
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -167,13 +217,13 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.3.3 [DEMO]
+WhyDown 0.3.4 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
 Kernel    : 6.12.0-demo
 Focus     : all
-Journal   : last 1440 minute(s), newest entries only
+Journal   : last 1440 minutes, newest entries only
 Findings  : ...
 
 1. [WARN] Network link disconnections were reported
@@ -227,14 +277,14 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.2; a live v0.3.3 retest and testing on the other five environments remain planned.** See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64) compiled v0.3.3 and successfully diagnosed system/user services. The v0.3.4 installer and the remaining Linux distributions still require manual platform testing.** See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.3.3 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.3.4 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Security and privacy
 
@@ -286,10 +336,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.3.1 (released):** system and user systemd failed-unit snapshots; temporal service-message groups without assuming one message equals one service outage.
 - **v0.3.2 (released):** filter privilege-wrapper command audit false positives; show approximate previous/current boot relation on historical service windows.
 - **v0.3.3 (released):** correct singular/plural labels in diagnostics and reports without changing detection logic or JSON schema.
+- **v0.3.4 (released):** guided Linux x86_64/ARM64 installer with automatic ABI detection, SHA-256 verification, and optional source build/preflight help; Raspberry Pi OS guidance.
 - **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.3.3: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.3.4: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
