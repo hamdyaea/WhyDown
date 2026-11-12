@@ -31,7 +31,8 @@ MAX_REPORT_BYTES = 8 * 1024 * 1024
 
 
 def build_command(binary, *, demo=False, focus="all", since="4h",
-                  max_events=10000, current_boot=True):
+                  max_events=10000, current_boot=True, disk_details=False,
+                  include_remote_mounts=False):
     """Only bounded, known CLI arguments; never use a shell."""
     if focus not in FOCUSES:
         raise ValueError("Unsupported diagnostic focus")
@@ -49,6 +50,10 @@ def build_command(binary, *, demo=False, focus="all", since="4h",
                "--no-progress"]
     if current_boot and not demo:
         command.append("--current-boot")
+    if disk_details and not demo:
+        command.append("--disk-details")
+    if include_remote_mounts and not demo:
+        command.append("--include-remote-mounts")
     return command
 
 
@@ -149,6 +154,8 @@ def parse_args(argv=None):
     parser.add_argument("--since", default="4h")
     parser.add_argument("--max-events", choices=(5000, 10000), type=int, default=10000)
     parser.add_argument("--current-boot", action="store_true")
+    parser.add_argument("--disk-details", action="store_true")
+    parser.add_argument("--include-remote-mounts", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -170,6 +177,8 @@ class WhyDownGUI:
         self.since = tk.StringVar(value=args.since)
         self.max_events = tk.StringVar(value=str(args.max_events))
         self.current_boot = tk.BooleanVar(value=args.current_boot)
+        self.disk_details = tk.BooleanVar(value=args.disk_details)
+        self.include_remote_mounts = tk.BooleanVar(value=args.include_remote_mounts)
         self.status = tk.StringVar(
             value="Ready: click Analyze this computer to collect evidence."
                   if not self.demo else
@@ -218,6 +227,14 @@ class WhyDownGUI:
             command=self.analyze)
         self.analyze_button.grid(row=1, column=4, padx=8, sticky="e")
         options.columnconfigure(4, weight=1)
+        advanced = ttk.Frame(options)
+        advanced.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        self.disk_check = ttk.Checkbutton(
+            advanced, text="Detailed disk usage (may be slow)", variable=self.disk_details)
+        self.disk_check.pack(side="left", padx=(0, 18))
+        self.remote_check = ttk.Checkbutton(
+            advanced, text="Include remote mounts (may block)", variable=self.include_remote_mounts)
+        self.remote_check.pack(side="left")
 
         line = ttk.Frame(shell)
         line.pack(fill="x", pady=(10, 8))
@@ -309,14 +326,17 @@ class WhyDownGUI:
         self.report = self.raw_report = None
         self.save_button.configure(state="disabled")
         self.analyze_button.configure(state="disabled")
-        for widget in (self.focus_box, self.since_box, self.cap_box, self.boot_check):
+        for widget in (self.focus_box, self.since_box, self.cap_box,
+                       self.boot_check, self.disk_check, self.remote_check):
             widget.configure(state="disabled")
         self.progress.start(12)
         self.status.set("Collecting evidence locally... You can keep using your desktop.")
         self.summary.set("Analyzing... No changes are being made to the system.")
         cmd = build_command(
             self.binary, demo=self.demo, focus=self.focus.get(), since=self.since.get(),
-            max_events=int(self.max_events.get()), current_boot=self.current_boot.get())
+            max_events=int(self.max_events.get()), current_boot=self.current_boot.get(),
+            disk_details=self.disk_details.get(),
+            include_remote_mounts=self.include_remote_mounts.get())
         self.worker = threading.Thread(target=self.collect, args=(cmd,), daemon=True)
         self.worker.start()
 
@@ -348,8 +368,11 @@ class WhyDownGUI:
                 kind, payload = self.messages.get_nowait()
                 self.progress.stop()
                 self.analyze_button.configure(state="normal")
-                for widget in (self.focus_box, self.since_box, self.cap_box, self.boot_check):
-                    widget.configure(state="normal" if widget is self.boot_check else "readonly")
+                for widget in (self.focus_box, self.since_box, self.cap_box,
+                               self.boot_check, self.disk_check, self.remote_check):
+                    widget.configure(
+                        state="readonly" if widget in
+                        (self.focus_box, self.since_box, self.cap_box) else "normal")
                 if kind == "ok":
                     self.report, self.raw_report = payload
                     self.show_report()
