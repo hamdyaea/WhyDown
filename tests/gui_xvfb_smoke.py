@@ -25,15 +25,22 @@ test_settings = tempfile.TemporaryDirectory(prefix="whydown-qt-theme-")
 os.environ["XDG_CONFIG_HOME"] = test_settings.name
 app = QtWidgets.QApplication(["WhyDown GUI test"])
 args = mod.parse_args(["--whydown-bin", str(binary), "--demo", "--current-boot"])
+preferences = QtCore.QSettings("WhyDown", "WhyDown")
+assert preferences.value("appearance/theme") is None, "Fresh install must have no saved preference"
 gui = mod.WhyDownGUI(args)
 gui.show()
 app.processEvents()
 try:
-    assert gui.theme_box.currentText() == "System"
+    assert gui.theme_box.currentText() == "Dark"
     initial_theme = gui.effective_theme
-    assert initial_theme in ("light", "dark")
+    assert initial_theme == "dark"
+    assert preferences.value("appearance/theme") is None, (
+        "Opening a GUI must not persist a setting before user choice")
+
 
     # Manual choice changes every themed widget and persists across launch.
+    gui.theme_box.setCurrentText("Light")
+    app.processEvents()
     gui.theme_box.setCurrentText("Dark")
     app.processEvents()
     assert gui.theme_preference == "dark"
@@ -72,7 +79,13 @@ try:
     finally:
         mod.system_prefers_dark = detector
     gui._system_theme_changed()
-    assert gui.effective_theme == initial_theme
+    assert gui.effective_theme in ("light", "dark")
+
+    # Explicitly chosen System is remembered, not silently replaced by Dark.
+    system_reopened = mod.WhyDownGUI(args)
+    assert system_reopened.theme_box.currentText() == "System"
+    system_reopened.close()
+    app.processEvents()
 
     assert gui.focus.currentText() == "all"
     assert gui.since.currentText() == "4h"
