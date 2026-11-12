@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, NetworkDropDelta, Snapshot};
+use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, NetworkDropDelta, ServiceStatus, Snapshot};
 use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
@@ -251,6 +251,47 @@ pub fn collect_with_options(
         Err(error) => snapshot.notes.push(format!(
             "Journal not collected (missing command, timeout, oversized output or I/O error): {error}"
         )),
+    }
+
+    // Historical systemd failure messages are not proof that the unit is still
+    // failed. Query only a few strictly validated system-unit names using a
+    // bounded, read-only subprocess. Never query names supplied as CLI options.
+    if focus.includes(Focus::Services) && snapshot.journal_checked {
+        let mut names: Vec<String> = snapshot.events.iter()
+            .filter(|e| e.kind == EventKind::ServiceFailure)
+            .filter(|e| e.source.as_deref() == Some("systemd"))
+            .filter_map(|e| e.subject.as_ref())
+            .filter(|name| safe_service_unit_name(name))
+            .cloned().collect();
+        names.sort();
+        names.dedup();
+        names.truncate(4);
+        for name in names {
+            progress.detail("systemctl show historical failure unit (max 3s each)");
+            let args = ["show", "--no-pager",
+                "--property=LoadState,ActiveState,SubState,Result,NRestarts",
+                "--", name.as_str()];
+            let start = Instant::now();
+            let state = run_capture_with_limits(
+                "systemctl", &args, Duration::from_secs(3), 8 * 1024);
+            snapshot.collector_timings.push(CollectorTiming {
+                name: "systemd historical unit status",
+                elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                succeeded: matches!(&state, Ok((true, _))),
+            });
+            match state {
+                Ok((true, output)) => {
+                    if let Some(status) = parse_service_status(&name, &output) {
+                        snapshot.service_statuses.push(status);
+                    } else {
+                        snapshot.notes.push(format!(
+                            "Current system-manager status unavailable for {name}; not assumed active"));
+                    }
+                }
+                _ => snapshot.notes.push(format!(
+                    "Could not query current system-manager status for {name}; not assumed active")),
+            }
+        }
     }
 
     // A second passive sample enables in-run counter deltas. Never infer new
@@ -559,6 +600,44 @@ pub fn parse_dpkg_status(content: &str) -> Vec<DpkgProblem> {
     problems.sort_by(|a, b| a.name.cmp(&b.name));
     problems.dedup_by(|a, b| a.name == b.name);
     problems
+}
+
+fn safe_service_unit_name(unit: &str) -> bool {
+    !unit.is_empty() && unit.len() <= 128 && unit.ends_with(".service")
+        && !unit.starts_with('-')
+        && unit.bytes().all(|b| b.is_ascii_alphanumeric()
+            || matches!(b, b'@' | b'.' | b'_' | b'-' | b':'))
+}
+
+fn parse_service_status(unit: &str, output: &str) -> Option<ServiceStatus> {
+    if !safe_service_unit_name(unit) { return None; }
+    let mut load = None;
+    let mut active = None;
+    let mut sub = None;
+    let mut result = None;
+    let mut n_restarts = None;
+    for line in output.lines() {
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.trim();
+        if value.len() > 64 || !value.bytes().all(|c| c.is_ascii_alphanumeric()
+            || matches!(c, b'-' | b'_')) { continue; }
+        match key {
+            "LoadState" => load = Some(value.to_owned()),
+            "ActiveState" => active = Some(value.to_owned()),
+            "SubState" => sub = Some(value.to_owned()),
+            "Result" => result = Some(value.to_owned()),
+            "NRestarts" => n_restarts = value.parse::<u64>().ok(),
+            _ => {},
+        }
+    }
+    let load_state = load?;
+    // Avoid claiming a system-unit status for user-only/unknown unit names.
+    if load_state == "not-found" { return None; }
+    Some(ServiceStatus {
+        unit: unit.to_owned(), load_state,
+        active_state: active?, sub_state: sub?, result: result?,
+        n_restarts,
+    })
 }
 
 pub fn parse_failed_units(content: &str) -> Vec<String> {
@@ -1145,6 +1224,21 @@ trigger-await\tiW \n";
         assert_eq!(entries[0].path, "/var/cache");
         assert_eq!(entries[1].path, "/var/lib");
         assert_eq!(entries[2].path, "/var/lib/manjaro-tools");
+    }
+
+    #[test]
+    fn bounded_service_status_parser_accepts_live_lightdm_state() {
+        let text = "LoadState=loaded\nActiveState=active\nSubState=running\nResult=success\nNRestarts=1\n";
+        let status = parse_service_status("lightdm.service", text).unwrap();
+        assert_eq!(status.active_state, "active");
+        assert_eq!(status.sub_state, "running");
+        assert_eq!(status.result, "success");
+        assert_eq!(status.n_restarts, Some(1));
+        assert!(parse_service_status("missing.service", "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
+        assert!(!safe_service_unit_name("--help.service"));
+        assert!(!safe_service_unit_name("../../x.service"));
+        assert!(!safe_service_unit_name("test.service\nInjected=true"));
+        assert!(safe_service_unit_name("systemd-user@1000.service"));
     }
 
     #[test]
