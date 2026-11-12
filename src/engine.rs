@@ -20,15 +20,45 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
     }
 
     if findings.is_empty() {
-        findings.push(Finding {
-            id: "NO_CLASSIFIED_ANOMALY",
-            severity: Severity::Info,
-            confidence: Confidence::Limited,
-            title: "No classified anomaly found".into(),
-            explanation: "No rule matched the available snapshot and selected journal entries. This does not establish that the system is healthy.".into(),
-            evidence: vec!["The available observations did not match a known diagnostic rule".into()],
-            checks: vec!["Increase --since or --max-events, inspect application-specific logs, and reproduce the failure if safe".into()],
-        });
+        // Do not present a "no anomaly" finding when core collectors were
+        // unavailable. Missing optional sensors still remain explicitly unknown.
+        let mut unavailable = Vec::new();
+        if !snapshot.journal_checked { unavailable.push("journalctl not verified"); }
+        if focus.includes(Focus::System) && !snapshot.disk_usage_checked {
+            unavailable.push("filesystem capacity not verified");
+        }
+        if focus.includes(Focus::Services) && !snapshot.system_units_checked
+            && snapshot.failed_user_units.is_none() {
+            unavailable.push("systemd units not verified");
+        }
+        if focus.includes(Focus::Network) &&
+            snapshot.ipv4_default_route.is_none() && snapshot.ipv6_default_route.is_none() {
+            unavailable.push("network routes not verified");
+        }
+        if focus.includes(Focus::Network) && snapshot.dns_nameservers.is_none() {
+            unavailable.push("DNS configuration not verified");
+        }
+        if unavailable.is_empty() {
+            findings.push(Finding {
+                id: "NO_CLASSIFIED_ANOMALY",
+                severity: Severity::Info,
+                confidence: Confidence::Limited,
+                title: "No classified anomaly found".into(),
+                explanation: "No rule matched the available snapshot and selected journal entries. This does not establish that the system is healthy.".into(),
+                evidence: vec!["The available observations did not match a known diagnostic rule".into()],
+                checks: vec!["Increase --since or --max-events, inspect application-specific logs, and reproduce the failure if safe".into()],
+            });
+        } else {
+            findings.push(Finding {
+                id: "INSUFFICIENT_EVIDENCE",
+                severity: Severity::Info,
+                confidence: Confidence::Limited,
+                title: "Core diagnostic collection was incomplete".into(),
+                explanation: "WhyDown cannot determine whether a known rule matches when core evidence is unavailable. This is not a positive health check or a confirmed system fault.".into(),
+                evidence: unavailable.into_iter().map(str::to_string).collect(),
+                checks: vec!["Review COLLECTION LIMITATIONS and permissions; rerun only the relevant focus after resolving collector access".into()],
+            });
+        }
     }
 
     let network_incidents = if focus.includes(Focus::Network) {
@@ -173,9 +203,9 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             id: "DNS_UNCONFIGURED",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: "No nameserver entry in /etc/resolv.conf".into(),
+            title: "No valid nameserver address in /etc/resolv.conf".into(),
             explanation: "Conventional libc DNS lookups may fail or use a resolver mechanism not represented by this file. Some applications use a separate DNS configuration.".into(),
-            evidence: vec!["No uncommented `nameserver` directive was found".into()],
+            evidence: vec!["No valid IP literal was found in an uncommented `nameserver` directive".into()],
             checks: vec!["Inspect `resolvectl status` or your network manager's DNS configuration".into()],
         });
     }
@@ -387,6 +417,20 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
 
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
     crate::health::assess(snapshot, findings);
+    if snapshot.root_filesystem_read_only == Some(true) {
+        findings.push(Finding {
+            id: "ROOT_FILESYSTEM_READ_ONLY",
+            severity: Severity::Info,
+            confidence: Confidence::Observed,
+            title: "Root filesystem is mounted read-only in this mount namespace".into(),
+            explanation: "The root mount has the ro option in /proc/self/mountinfo. This can be an intentional immutable/live/container configuration, or a response to errors. It is not itself proof of an unexpected filesystem failure.".into(),
+            evidence: vec!["Mountpoint / has the ro flag in the active mount namespace".into()],
+            checks: vec![
+                "Inspect `findmnt -no SOURCE,FSTYPE,OPTIONS /` and the intended system image design".into(),
+                "Review kernel filesystem errors before attempting any remount; do not automatically change mount flags".into(),
+            ],
+        });
+    }
     if snapshot.pacman_checked == Some(true) && snapshot.pacman_consistent == Some(false) {
         findings.push(Finding {
             id: "PACMAN_DATABASE_CHECK_FAILED",
@@ -469,6 +513,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
     for (kind, id, title, explain, check) in [
         (EventKind::OutOfMemory, "OOM_EVENTS", "Out-of-memory events reported", "The journal contains messages consistent with memory exhaustion or process termination by an OOM killer.", "Review memory pressure and kernel logs around the event"),
         (EventKind::StorageError, "STORAGE_ERRORS", "Storage errors reported", "The journal contains storage-related error messages; their severity and affected device are not determined by this classifier.", "Inspect kernel storage logs, available disk space and hardware health"),
+        (EventKind::FileHandleExhaustion, "FD_EXHAUSTION_LOGS", "File-descriptor exhaustion messages reported", "The selected journal contains explicit too-many-open-files or file-table-overflow messages. They may relate to one process's per-process limit rather than the kernel's global file-max.", "Inspect process limits, /proc/sys/fs/file-nr, service logs and ulimit -n"),
     ] {
         let n = count(events, kind);
         if n > 0 {
@@ -680,8 +725,47 @@ mod tests {
     }
 
     #[test]
-    fn explicit_no_anomaly_message() {
-        let report = analyze(Snapshot::default(), 60, Focus::All, true);
+    fn no_anomaly_requires_core_evidence() {
+        let healthy = Snapshot {
+            journal_checked: true,
+            disk_usage_checked: true,
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            ipv4_default_route: Some(true),
+            dns_nameservers: Some(1),
+            ..Snapshot::default()
+        };
+        let report = analyze(healthy, 60, Focus::All, true);
         assert_eq!(report.findings[0].id, "NO_CLASSIFIED_ANOMALY");
+
+        let incomplete = analyze(Snapshot::default(), 60, Focus::All, true);
+        assert_eq!(incomplete.findings[0].id, "INSUFFICIENT_EVIDENCE");
+        assert_eq!(incomplete.findings[0].scope(), "unverified");
+        assert!(incomplete.findings[0].evidence.iter()
+            .any(|x| x.contains("journalctl not verified")));
+    }
+
+    #[test]
+    fn root_read_only_is_not_automatically_a_failure() {
+        let report = analyze(Snapshot {
+            root_filesystem_read_only: Some(true), ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        let root = report.findings.iter()
+            .find(|f| f.id == "ROOT_FILESYSTEM_READ_ONLY").unwrap();
+        assert_eq!(root.severity, Severity::Info);
+        assert_eq!(root.scope(), "current_snapshot");
+    }
+
+    #[test]
+    fn historical_fd_exhaustion_classified_independently_of_current_file_nr() {
+        let report = analyze(Snapshot {
+            events: vec![Event {
+                timestamp: 1_700_000_000,
+                kind: EventKind::FileHandleExhaustion,
+                source: Some("app".into()), subject: None,
+            }],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        assert!(report.findings.iter().any(|f| f.id == "FD_EXHAUSTION_LOGS"));
     }
 }
