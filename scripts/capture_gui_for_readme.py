@@ -5,12 +5,10 @@ The program is run in fictional demo mode under Xvfb. No host journal,
 network access, user identifiers or secrets are included in the image.
 Run with: xvfb-run -a python3 scripts/capture_gui_for_readme.py /path/to/whydown
 
-Without --emit-base64, write docs/images/whydown-gui-dark.jpg locally.
-With --emit-base64, emit marker-delimited JPEG base64 for CI artifact upload.
+Write docs/images/whydown-gui-dark.jpg locally; this is a developer tool.
 """
 from __future__ import annotations
 import argparse
-import base64
 import importlib.util
 import os
 import pathlib
@@ -67,17 +65,11 @@ def capture(binary: pathlib.Path, output: pathlib.Path) -> pathlib.Path:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=pathlib.Path)
-    parser.add_argument("--emit-base64", action="store_true")
     parser.add_argument("--output", type=pathlib.Path,
                         default=ROOT / "docs/images/whydown-gui-dark.jpg")
     args = parser.parse_args()
     path = capture(args.binary.resolve(), args.output)
-    if args.emit_base64:
-        print("WHYDOWN_SCREENSHOT_BASE64_START", flush=True)
-        print(base64.b64encode(path.read_bytes()).decode("ascii"), flush=True)
-        print("WHYDOWN_SCREENSHOT_BASE64_END", flush=True)
-    else:
-        print(f"Generated fictional Qt6 screenshot: {path}")
+    print(f"Generated fictional Qt6 screenshot: {path}")
 
 
 if __name__ == "__main__":
