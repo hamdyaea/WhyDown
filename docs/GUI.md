@@ -51,6 +51,29 @@ The shortcut is created only when requested, and the installer warns if
 optional Qt dependencies are missing. Ordinary binary installations and
 terminal commands do not require Python or PyQt6.
 
+## Appearance: System / Light / Dark
+
+Use the **Appearance** menu at the top right of the Qt6 window to choose:
+
+- **System** (the default on first launch): use the desktop theme when Qt
+  exposes it. On Qt 6.5+ the app observes platform color-scheme updates and
+  switches automatically as your desktop changes. On earlier Qt versions,
+  the application falls back to the current Qt desktop palette and follows
+  palette-change notifications when provided by the platform integration.
+- **Light**: always use the clear, light WhyDown layout, independent of OS theme.
+- **Dark**: use the full dark palette for the sidebar, settings, metrics,
+  tabs, event lists, evidence editors and text selections.
+
+The change is immediate: no restart or new diagnostic is required. WhyDown
+**remembers your explicit choice** using a local Qt `QSettings` preference
+(`appearance/theme`, under the user's XDG configuration). No theme choice
+is written merely by opening the program, and no configuration is uploaded.
+
+The system setting is best-effort where older Qt or desktop integrations do
+not expose live theme-change notifications. You can always choose Light
+or Dark manually. GUI appearance does not affect CLI/TUI output, diagnostic
+rules, the read-only collector, clipboard behavior or JSON exports.
+
 ## Design and use
 
 The app features a dark sidebar, visual warning/observation/event summary
