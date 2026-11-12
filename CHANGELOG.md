@@ -2,6 +2,22 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.7.0] - 2026-11-12
+
+### Added
+- Historical Wi-Fi reassociation on the **same** interface can now be correlated with a preceding link loss (up to 120s). The original warning remains, with additional evidence of association and no claim that Internet access was restored.
+- Local-choice deauthentication followed by association within 30s is `WIFI_LOCAL_ROAM_OBSERVED` (informational), not a hard link-down warning. Plain Wi-Fi associations are positive context rather than standalone failures or zero-count incident windows.
+- Explicit systemd `Scheduled restart job` messages are retained as bounded service-restart events. Historical service-failure findings note a correlated restart and current failed-unit state; `SERVICE_RESTART_OBSERVED` is informational and does not certify service readiness.
+- `USB_DISCONNECT_BURST` (warning) groups four or more distinct short USB topology paths detached within 30s, potentially an unplugged hub/dock. Nearby r8152 status errors enrich evidence without claiming hardware failure or causation of network events.
+- Two read-only /proc/net/dev samples per network run record per-interface RX/TX dropped-counter deltas and duration. Informational `RECENT_INTERFACE_DROPS` requires >=10 new drops over >=100ms. Counter resets are excluded; cumulative counters remain separate.
+- `DISK_CAPACITY_WATCH` informational advisory at 85–89% filesystem occupancy. `DISK_NEAR_FULL` warning at >=90% is unchanged.
+
+### Tests and compatibility
+- New Rust regression fixtures based on real Manjaro USB detach / Wi-Fi reassociation / local roaming / LightDM restart cases and clean UFW-blocked multicast noise.
+- Unit tests for matching interface correlation, counters that reset, USB grouping and disk threshold boundaries. JSON schema v2 additive field `system.interface_drop_deltas`; terminal and HTML also expose measured deltas.
+- No active connectivity probes, package changes, privilege escalation, telemetry, network calls or external Rust dependencies. These are evidence-based observations; hardware fault and service recovery are not automatically verified.
+- Real v0.6.1 Manjaro validation: 4,598 current-boot journal lines scanned with no truncation, and two consistent historical findings in text/JSON. v0.7.0 field test remains pending.
+
 ## [0.6.1] - 2026-11-12
 
 ### Fixed
