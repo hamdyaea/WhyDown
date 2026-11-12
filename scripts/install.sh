@@ -2,7 +2,7 @@
 # WhyDown: install prebuilt Linux binaries (default), or build locally.
 # No automatic system package installation, sudo or service changes.
 set -eu
-VERSION="${WHYDOWN_VERSION:-v0.8.1}"
+VERSION="${WHYDOWN_VERSION:-v0.9.0}"
 PREFIX="${WHYDOWN_PREFIX:-${HOME:-}/.local}"
 LIBC=auto
 MODE=binary
