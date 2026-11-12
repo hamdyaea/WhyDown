@@ -44,7 +44,8 @@ impl Finding {
             | "MEMORY_STALL_PRESSURE" | "IO_STALL_PRESSURE"
             | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
             | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY"
-            | "CPU_CONTENTION_PRESSURE" | "RECENT_INTERFACE_DROPS" => "current_snapshot",
+            | "CPU_CONTENTION_PRESSURE" | "RECENT_INTERFACE_DROPS"
+            | "DISK_CAPACITY_WATCH" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE"
             | "JOURNAL_WINDOW_TRUNCATED" => "unverified",
             _ => "historical_journal",
