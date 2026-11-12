@@ -1,137 +1,114 @@
-# WhyDown Desktop GUI
+# WhyDown Qt 6 desktop interface
 
-WhyDown now offers an **optional graphical desktop interface**, while retaining
-the fast read-only Rust CLI and the SSH-friendly terminal menu.
+WhyDown v0.10.0 replaces its experimental Tkinter frontend with a **modern Qt 6
+(PyQt6)** graphical interface. The diagnostic engine remains entirely in Rust;
+the headless CLI and SSH-friendly TUI remain available without Qt.
 
-## Launch it
-
-Install or update the normal WhyDown binary and then start the GUI:
+## Start
 
 ```bash
-whydown gui
-# Optional fictional demonstration, without reading local system data:
-whydown gui --demo
+whydown gui                 # Real local read-only diagnostics
+whydown gui --demo          # Fictional results, no host data collected
 ```
 
-The full Python/Tkinter frontend is **embedded in the Rust release binary**. No
-separate Python script download, pip package or new Rust crate is needed. A
-local Python 3 interpreter with Tkinter is required **only for the graphical
-mode**. Before using the desktop GUI, **the installer automatically checks Python 3
-and whether `python3 -c 'import tkinter'` succeeds**. The standalone check
-also works without downloading/installing WhyDown:
+The graphical frontend is embedded into the normal WhyDown Rust executable;
+the launcher uses Python 3 and the distribution-provided PyQt6 bindings when
+requested. **There is no pip download, automatic package installation, web
+browser, network probe, telemetry or privilege escalation.**
+
+Use the installer to check its optional dependencies:
 
 ```bash
 sh scripts/install.sh --check-gui-prereqs
 ```
 
-The check exits 0 when both are available and 1 if either is missing. It does
-not start a GUI or test the window system. On Manjaro/Arch, the installer
-suggests `sudo pacman -S python tk` when dependencies are missing; on
-Debian/Ubuntu it suggests `sudo apt install python3 python3-tk`. It never
-runs these commands itself. X11 or XWayland is needed
-by Tk on Linux; if there is no graphical display, use `whydown tui`.
+If PyQt6 is missing, install the native package as appropriate:
 
-To add an **optional application-menu shortcut** when installing:
+```bash
+# Manjaro / Arch Linux
+sudo pacman -S python python-pyqt6
+
+# Debian 12/13 and Ubuntu
+sudo apt install python3 python3-pyqt6
+
+# Fedora
+sudo dnf install python3 python3-pyqt6
+```
+
+The prerequisite check returns nonzero if Python 3 or the PyQt6 QtWidgets
+bindings are missing and prints the relevant instruction. It **does not**
+install them on the user's behalf. Qt requires an available X11, XWayland or
+compatible Wayland graphical session; SSH/headless users can use
+`whydown tui`. Python/Tkinter is no longer used by the GUI.
+
+To install a user-owned application-menu entry:
 
 ```bash
 sh scripts/install.sh --desktop
 ```
 
-The new launcher is written only with explicit `--desktop` consent to
-`${XDG_DATA_HOME:-$HOME/.local/share}/applications/whydown.desktop`, invokes
-the installed binary as `whydown gui`, and uses the system's normal monitoring
-icon. The installer does not require root or install Python/Tk on your behalf.
-When `--desktop` is used without the GUI prerequisites, it still creates the
-requested launcher, but emits a clear warning that the GUI cannot start until
-they are supplied. CLI/TUI binaries remain fully functional without either
-Python or Tkinter. Normal installation leaves the applications menu unchanged.
+The shortcut is created only when requested, and the installer warns if
+optional Qt dependencies are missing. Ordinary binary installations and
+terminal commands do not require Python or PyQt6.
 
-## User journey: no number menus required
+## Design and use
 
-1. **Start WhyDown GUI.** Focus defaults to **all** (recommended), the journal
-   window to **4 hours**, current-boot-only to **enabled**, and the maximum
-   journal entries to **10,000**. These are guided-mode defaults only;
-   `whydown diagnose` preserves its existing CLI defaults.
-2. **Click "Analyze this computer".** WhyDown runs its unchanged local Rust
-   diagnostic engine in a worker process, without blocking the graphical
-   interface or invoking a shell.
-3. **Read the results automatically.** The Findings & evidence tab is opened,
-   displaying the findings and an explanation for the first one. Click any
-   finding to see evidence, confidence, temporal scope and *suggested checks*.
-   The Timeline and Coverage tabs explain the sequence of events and which
-   parts of the machine could or could not be verified.
-4. Optional: click **Save private JSON report** to export exactly the analyzed
-   snapshot. Nothing is automatically written or transmitted.
+The app features a dark sidebar, visual warning/observation/event summary
+cards, a single **Run diagnostics** action, resizable results, and Qt-styled
+navigation. **Focus defaults to `all`**, current-boot evidence, 4-hour
+lookback and 10,000 journal entries. Change scope or optional disk/remote
+checks before pressing Run diagnostics; re-run when you change settings.
 
-### Copy just the text you need
+After a diagnostic, findings appear automatically. Click a finding to inspect
+its evidence, scope, confidence and suggested read-only checks. Switch
+between **Findings & evidence**, **Event timeline**, and **Coverage & limits**.
+The backend uses a separate, bounded `QProcess` to run the existing Rust
+diagnostic executable asynchronously, without shell interpretation. Output
+is capped at 8 MiB and the run times out after 240 seconds.
 
-In **Findings & evidence** and **Coverage & limits**, highlight any portion
-of the explanatory text with your mouse (one line or several), then:
+### Mouse selection and copy: fixed
 
-- Press **Ctrl+C**, or right-click the highlighted text and choose
-  **Copy selected text**, or press **Copy selection** at the bottom.
-- Use **Ctrl+A** or right-click **Select all text** only when you want the
-  complete text of the current detail/coverage pane, not the entire report.
-- In **Timeline** or the findings list, select a row and press **Ctrl+C**,
-  right-click **Copy selected row(s)**, or click **Copy selection**. Rows
-  are copied as tab-separated columns.
-- Only the selected passage or row goes to the **local system clipboard**.
-  Nothing is copied automatically and no report file is created. If the
-  text selection is empty, WhyDown shows an explanatory message instead
-  of copying the entire report.
+The finding and coverage panes use **enabled but read-only Qt
+`QPlainTextEdit` widgets**. Drag across words or lines with the mouse to
+highlight them; the normal native Qt text context menu and **Ctrl+C**
+work. The **Copy selection** button copies exactly that highlighted passage
+to your local clipboard. There is no entire-report fallback if nothing is
+selected. Timeline rows can be selected and copied as tab-separated text.
 
-This is especially useful for sharing a short, relevant log finding or
-suggested check without exporting the full JSON report. The clipboard may
-contain hostnames, service names, mountpoints and other local identifiers,
-so review before pasting into a public issue or message.
+`Ctrl+A` selects the current pane's text (not the entire diagnostic report).
+Selected text may reveal local service names, network interfaces or mountpoint
+paths; review it before pasting into a public report.
 
-### Settings
+### Saving a report
 
-- **Focus:** all (recommended) / network / services / system.
-- **Journal lookback:** 1h / 4h / 24h / 7d, plus a validated custom CLI
-  lookback if supplied when launching GUI.
-- **Journal limit:** 5,000 / 10,000.
-- **Current boot:** on by default, off for older accessible journal entries.
-- **Advanced opt-in:** inspect large disk directories or include remote mounts.
-  These may take longer or block on unavailable remote storage.
+An independent **Export JSON** action is enabled after analysis. It requires
+explicit file selection, creates private `0600` files on Linux, and never
+overwrites existing files. Nothing is saved or transmitted automatically.
 
-Changing settings never silently changes an existing report. Press Analyze
-again for a fresh, clearly labeled snapshot. A truncated journal window is
-marked **PARTIAL** with guidance to narrow the time window.
+## Guarantees and limits
 
-## Privacy and safety
+- Read-only diagnostics: no service restarts, package modifications, automatic
+  repairs, external DNS probes or telemetry.
+- Findings are time-scoped observations, not verified causes. `active/running`
+  does not prove a service is application-ready.
+- JSON schema v2 and the diagnostic engine are unchanged. GUI, TUI and CLI
+  expose the same underlying report model.
+- Python/PyQt6 are optional *GUI-only* runtime dependencies. Qt visual behavior
+  follows desktop font rendering and may vary between distributions.
 
-- Offline and local: GUI makes no network requests and sends no telemetry.
-- No privileged actions, repairs, package installs or service restarts.
-- The GUI invokes the same installed Rust `whydown diagnose` process with
-  fixed, validated argument values. It does not use `sh -c` or `bash -c`.
-- No raw journal message bodies are retained by WhyDown's structured report.
-  Local unit names, mountpoints and interfaces may be visible: inspect before
-  sharing a saved report.
-- File export is **explicit opt-in**. New JSON reports have permissions
-  `0600` on Linux and an existing path is never overwritten.
-- A finding with confidence "observed" does not prove causality. A systemd
-  service that is `active/running` is not guaranteed application-ready and
-  a Wi-Fi association does not prove Internet availability.
-- GUI is not continuous monitoring; each click collects a new snapshot.
-- If Tkinter or a desktop display is unavailable, the CLI and terminal menu
-  continue to work without those optional dependencies.
-
-## Testing
-
-Pure GUI model tests run without a display:
+## Automated and on-host testing
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_gui.py' -v
-```
-
-A separate smoke test creates an actual Tk window and drives a fictional
-diagnosis under Xvfb on Linux CI:
-
-```bash
 xvfb-run -a python3 tests/gui_xvfb_smoke.py ./target/release/whydown
 ```
 
-The first GUI release still requires confirmation on real Manjaro desktop
-hardware. Synthetic and virtual display tests cannot establish compatibility
-with every window manager or display server.
+The Xvfb test opens the real Qt6 GUI and uses **actual mouse input** to select
+a word from the evidence pane, asserting that native Ctrl+C and the copy
+button place exactly that selection on the clipboard. It also checks
+coverage text, timeline rows and empty-selection safety. Normal CI and
+release CI both run the test.
+
+After installing the released executable, real-world Manjaro and Debian
+desktop compatibility should still be confirmed, particularly on Wayland
+compositors and external clipboard managers.
