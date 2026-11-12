@@ -25,7 +25,7 @@ try:
     assert gui.focus.get() == "all"
     assert gui.since.get() == "4h"
     assert gui.max_events.get() == "10000"
-    assert gui.save_button.cget("state") == "disabled"
+    assert "disabled" in gui.save_button.state()
     gui.analyze()
     deadline = time.monotonic() + 20
     while gui.report is None and time.monotonic() < deadline:
@@ -36,7 +36,7 @@ try:
     assert gui.report["demo"] is True
     assert "Analysis complete" in gui.status.get()
     assert "warning(s)" in gui.summary.get()
-    assert gui.save_button.cget("state") == "normal"
+    assert "disabled" not in gui.save_button.state()
     assert gui.tabs.tab(gui.tabs.select(), "text") == "Findings & evidence"
     assert gui.coverage.get("1.0", "end").find("COLLECTION COVERAGE") != -1
     print("Real Tk GUI smoke test (fictional demo only): passed")
