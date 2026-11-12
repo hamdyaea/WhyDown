@@ -38,6 +38,9 @@ pub fn run_with_io<R: BufRead, W: Write>(
 ) -> io::Result<()> {
     let demo_mode = cli.tui_demo;
     let mut last: Option<Report> = None;
+    // Never silently discard an action typed on a sub-page's continue prompt.
+    let mut pending_selection: Option<String> = None;
+    let mut notice = String::from("Type a menu number followed by Enter.");
     loop {
         heading(output, clear_screen, "Dashboard")?;
         writeln!(output, "Mode: {}  |  Focus: {}  |  Lookback: {}  |  Boot: {}  |  Journal cap: {}",
@@ -45,6 +48,7 @@ pub fn run_with_io<R: BufRead, W: Write>(
             cli.focus.as_str(), lookback(cli.since_seconds),
             if cli.current_boot { "current only" } else { "all accessible" },
             cli.max_events)?;
+        writeln!(output, "\nSTATUS: {notice}")?;
         match &last {
             Some(report) => {
                 let warnings = report.findings.iter()
@@ -55,7 +59,7 @@ pub fn run_with_io<R: BufRead, W: Write>(
                     if report.snapshot.journal_truncated { " [PARTIAL]" } else { "" })?;
                 writeln!(output, "Current local evidence is a snapshot; historical warnings may have recovered.")?;
             }
-            None => writeln!(output, "No diagnostic run yet. Select 1 to collect or generate a demo.")?,
+            None => writeln!(output, "No report for these settings yet. Select 1 to run a diagnostic.")?,
         }
         writeln!(output, "\n  1  Run diagnostic")?;
         writeln!(output, "  2  Change focus")?;
@@ -67,7 +71,12 @@ pub fn run_with_io<R: BufRead, W: Write>(
         writeln!(output, "  8  Coverage and limitations")?;
         writeln!(output, "  9  Copyable safe export commands")?;
         writeln!(output, "  0  Quit")?;
-        match choice(input, output, "Selection")?.as_deref() {
+        writeln!(output, "\nChoose a number and press Enter. Options 2-5 require option 1 to refresh.")?;
+        let selected = match pending_selection.take() {
+            Some(next) => Some(next),
+            None => choice(input, output, "Selection (number + Enter)")?,
+        };
+        match selected.as_deref() {
             Some("0" | "q" | "Q") | None => break,
             Some("1") => {
                 heading(output, clear_screen, "Collecting evidence")?;
@@ -75,8 +84,15 @@ pub fn run_with_io<R: BufRead, W: Write>(
                     if demo_mode { "fictional" } else { "read-only live" })?;
                 output.flush()?;
                 last = Some(diagnose_now(&cli, demo_mode));
-                writeln!(output, "Diagnostic complete. Findings ready for review.")?;
-                pause(input, output)?;
+                let report = last.as_ref().expect("diagnostic report just created");
+                let warnings = report.findings.iter()
+                    .filter(|f| f.severity == Severity::Warning).count();
+                notice = format!(
+                    "Diagnostic completed: {warnings} warning(s), {} finding(s), {} journal entries{}. Choose 6 to view evidence, 7 for events, or 8 for coverage.",
+                    report.findings.len(), report.snapshot.journal_entries_examined,
+                    if report.snapshot.journal_truncated { " [PARTIAL: try option 5]" } else { "" }
+                );
+                // No extra pause: the next number is a dashboard action.
             }
             Some("2") => {
                 cli.focus = match cli.focus {
@@ -86,25 +102,42 @@ pub fn run_with_io<R: BufRead, W: Write>(
                     Focus::System => Focus::All,
                 };
                 last = None; // no stale report shown with new configuration
+                notice = format!("Focus changed to {}. Select 1 to refresh the diagnostic.", cli.focus.as_str());
             }
             Some("3") => {
                 let index = LOOKBACKS.iter().position(|v| *v == cli.since_seconds);
                 cli.since_seconds = LOOKBACKS[index.map(|i| (i + 1) % LOOKBACKS.len()).unwrap_or(0)];
                 last = None;
+                notice = format!("Lookback changed to {}. Select 1 to refresh the diagnostic.", lookback(cli.since_seconds));
             }
             Some("4") => {
                 cli.current_boot = !cli.current_boot;
                 last = None;
+                notice = format!("Current boot filter {}. Select 1 to refresh the diagnostic.",
+                    if cli.current_boot { "enabled" } else { "disabled" });
             }
             Some("5") => {
                 cli.max_events = if cli.max_events == 10_000 { 5_000 } else { 10_000 };
                 last = None;
+                notice = format!("Journal cap changed to {}. Select 1 to refresh the diagnostic.", cli.max_events);
             }
-            Some("6") => findings(input, output, clear_screen, last.as_ref())?,
-            Some("7") => timeline(input, output, clear_screen, last.as_ref())?,
-            Some("8") => coverage(input, output, clear_screen, last.as_ref())?,
-            Some("9") => export_guide(input, output, clear_screen, &cli, demo_mode)?,
-            _ => {}
+            Some("6") => {
+                pending_selection = findings(input, output, clear_screen, last.as_ref())?;
+                notice = "Returned from findings. Enter a menu number and press Enter.".into();
+            }
+            Some("7") => {
+                pending_selection = timeline(input, output, clear_screen, last.as_ref())?;
+                notice = "Returned from timeline. Enter a menu number and press Enter.".into();
+            }
+            Some("8") => {
+                pending_selection = coverage(input, output, clear_screen, last.as_ref())?;
+                notice = "Returned from coverage. Enter a menu number and press Enter.".into();
+            }
+            Some("9") => {
+                pending_selection = export_guide(input, output, clear_screen, &cli, demo_mode)?;
+                notice = "Returned from export guidance. Enter a menu number and press Enter.".into();
+            }
+            _ => notice = "Unknown selection: enter one of the displayed numbers followed by Enter.".into(),
         }
     }
     writeln!(output, "\nWhyDown TUI closed; no system changes made.")?;
@@ -153,9 +186,11 @@ fn choice<R: BufRead, W: Write>(input: &mut R, output: &mut W, prompt: &str) -> 
     Ok(Some(line.trim().chars().take(32).collect()))
 }
 
-fn pause<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> io::Result<()> {
-    let _ = choice(input, output, "Press Enter to continue")?;
-    Ok(())
+/// Continue or forward the next dashboard command instead of swallowing it.
+fn pause<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> io::Result<Option<String>> {
+    let next = choice(input, output, "Enter = return, or type 1-9 + Enter for next action")?;
+    Ok(next.filter(|value| matches!(value.as_str(),
+        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")))
 }
 
 /// Journal-controlled identifiers and local filesystem paths are not allowed
@@ -168,7 +203,7 @@ fn safe(value: &str) -> String {
 
 fn findings<R: BufRead, W: Write>(
     input: &mut R, output: &mut W, clear: bool, report: Option<&Report>,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     heading(output, clear, "Findings")?;
     let Some(report) = report else {
         writeln!(output, "Run a diagnostic first (menu option 1).")?;
@@ -187,9 +222,9 @@ fn findings<R: BufRead, W: Write>(
         writeln!(output, "Showing the first {MAX_LIST} findings; use --format json for all.")?;
     }
     writeln!(output, " 0. Return to dashboard")?;
-    let Some(option) = choice(input, output, "Finding number")? else { return Ok(()); };
-    let Ok(number) = option.parse::<usize>() else { return Ok(()); };
-    if number == 0 || number > report.findings.len().min(MAX_LIST) { return Ok(()); }
+    let Some(option) = choice(input, output, "Finding number")? else { return Ok(None); };
+    let Ok(number) = option.parse::<usize>() else { return Ok(None); };
+    if number == 0 || number > report.findings.len().min(MAX_LIST) { return Ok(None); }
     let finding = &report.findings[number - 1];
     heading(output, clear, "Finding evidence")?;
     writeln!(output, "{} [{}] | confidence={} | scope={}",
@@ -210,7 +245,7 @@ fn findings<R: BufRead, W: Write>(
 
 fn timeline<R: BufRead, W: Write>(
     input: &mut R, output: &mut W, clear: bool, report: Option<&Report>,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     heading(output, clear, "Recent classified events")?;
     let Some(report) = report else {
         writeln!(output, "Run a diagnostic first (menu option 1).")?;
@@ -235,7 +270,7 @@ fn timeline<R: BufRead, W: Write>(
 
 fn coverage<R: BufRead, W: Write>(
     input: &mut R, output: &mut W, clear: bool, report: Option<&Report>,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     heading(output, clear, "Collection coverage & uncertainty")?;
     let Some(report) = report else {
         writeln!(output, "Run a diagnostic first (menu option 1).")?;
@@ -267,7 +302,7 @@ fn coverage<R: BufRead, W: Write>(
 
 fn export_guide<R: BufRead, W: Write>(
     input: &mut R, output: &mut W, clear: bool, cli: &Cli, demo_mode: bool,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     heading(output, clear, "Private report export")?;
     let cmd = if demo_mode { "demo" } else { "diagnose" };
     let boot = if cli.current_boot && !demo_mode { " --current-boot" } else { "" };
