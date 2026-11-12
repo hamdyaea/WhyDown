@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn file_nr_validation_and_threshold() {
         assert!(parse_file_nr("9 10 20").is_none());
-        let mut s = Snapshot::default(); s.file_handle_health = parse_file_nr("950 0 1000");
+        let s = Snapshot { file_handle_health: parse_file_nr("950 0 1000"), ..Snapshot::default() };
         let mut v = vec![]; assess(&s, &mut v);
         assert!(v.iter().any(|f| f.id == "FILE_HANDLE_LIMIT_NEAR"));
     }
@@ -237,7 +237,7 @@ mod tests {
     fn mdstat_distinguishes_degraded_and_healthy() {
         let t = "Personalities : [raid1]\nmd0 : active raid1 sda1[0] sdb1[1]\n  100 blocks [2/2] [UU]\n\nmd127 : active raid1 sdc1[0]\n  100 blocks [2/1] [U_]\n\nunused devices: <none>\n";
         let a = parse_mdstat(t); assert_eq!(a.len(), 2);
-        let mut s = Snapshot::default(); s.raid_health = a;
+        let s = Snapshot { raid_health: a, ..Snapshot::default() };
         let mut v = vec![]; assess(&s, &mut v);
         assert_eq!(v.iter().filter(|f| f.id == "MD_RAID_DEGRADED").count(), 1);
     }
@@ -257,8 +257,13 @@ mod tests {
 
     #[test]
     fn memory_and_io_sustained_thresholds() {
-        let mut s = Snapshot::default();
-        s.memory_health = Some(MemoryHealth { total_kib: 2_048_000, available_kib: 20_000, swap_total_kib: None, swap_free_kib: None });
+        let mut s = Snapshot {
+            memory_health: Some(MemoryHealth {
+                total_kib: 2_048_000, available_kib: 20_000,
+                swap_total_kib: None, swap_free_kib: None,
+            }),
+            ..Snapshot::default()
+        };
         s.pressure_health.push(PressureHealth { resource: "io".into(), some_avg60_x100: Some(9000), full_avg60_x100: Some(1800) });
         let mut v = vec![]; assess(&s, &mut v);
         assert!(v.iter().any(|f| f.id == "LOW_MEMORY_HEADROOM"));
