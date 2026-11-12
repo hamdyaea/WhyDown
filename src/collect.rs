@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
+use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, NetworkDropDelta, Snapshot};
 use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
@@ -42,6 +42,7 @@ pub fn collect_with_options(
         ..Snapshot::default()
     };
 
+    let network_sample_started = Instant::now();
     if focus.includes(Focus::Network) {
         progress.begin("Inspecting network");
         match fs::read_to_string("/proc/net/route") {
@@ -252,6 +253,21 @@ pub fn collect_with_options(
         )),
     }
 
+    // A second passive sample enables in-run counter deltas. Never infer new
+    // packet drops from a single cumulative counter and never delay diagnosis.
+    if focus.includes(Focus::Network) && !snapshot.interfaces.is_empty() {
+        match fs::read_to_string("/proc/net/dev") {
+            Ok(raw) => {
+                let latest = parse_interfaces(&raw);
+                snapshot.interface_drop_deltas = Some(compare_interface_drops(
+                    &snapshot.interfaces, &latest,
+                    network_sample_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                ));
+            }
+            Err(_) => snapshot.notes.push(
+                "Second interface counter sample unavailable; packet-drop deltas not verified".into()),
+        }
+    }
     progress.complete_step();
     snapshot
 }
@@ -470,6 +486,22 @@ pub fn parse_resolv_conf(content: &str) -> (usize, bool) {
     (servers.len(), stub)
 }
 
+/// Only compare interfaces seen in both samples with nondecreasing counters.
+pub fn compare_interface_drops(
+    before: &[InterfaceStats], after: &[InterfaceStats], elapsed_ms: u64,
+) -> Vec<NetworkDropDelta> {
+    if elapsed_ms == 0 { return Vec::new(); }
+    before.iter().filter_map(|old| {
+        let new = after.iter().find(|item| item.name == old.name)?;
+        Some(NetworkDropDelta {
+            name: old.name.clone(),
+            rx_dropped_delta: new.rx_dropped.checked_sub(old.rx_dropped)?,
+            tx_dropped_delta: new.tx_dropped.checked_sub(old.tx_dropped)?,
+            elapsed_ms,
+        })
+    }).take(64).collect()
+}
+
 pub fn parse_interfaces(content: &str) -> Vec<InterfaceStats> {
     content.lines().skip(2).filter_map(|line| {
         let (name, counters) = line.split_once(':')?;
@@ -628,7 +660,21 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
             }
         }
     }
-    if kind == EventKind::ServiceFailure {
+    if matches!(kind, EventKind::UsbDisconnect | EventKind::UsbTransportError) {
+        // Typical kernel records: "usb 1-5.1: USB disconnect..." or
+        // "r8152-cfgselector 1-1.2: USB disconnect...". Device topology
+        // identifiers are kept, not serial numbers or command arguments.
+        for word in text.split_whitespace() {
+            if let Some(candidate) = word.strip_suffix(':') {
+                if candidate.len() <= 32 && candidate.starts_with(|c: char| c.is_ascii_digit())
+                    && candidate.bytes().all(|c| c.is_ascii_digit() || c == b'.' || c == b'-')
+                    && candidate.contains('-') {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+    }
+    if matches!(kind, EventKind::ServiceFailure | EventKind::ServiceRestartScheduled) {
         for word in text.split_whitespace() {
             if let Some(name) = identifier(word) {
                 if [".service", ".socket", ".mount", ".timer", ".target", ".path"]
@@ -694,6 +740,26 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
 
 pub fn classify_log_line(text: &str) -> Option<EventKind> {
     let t = text.to_ascii_lowercase();
+
+    // Expected handoffs must not be classified as hard link failures. A
+    // successful association is evidence of reconnect, not Internet access.
+    if t.contains("deauthenticating from") && t.contains("by local choice")
+        && ["wlan", "wlp", "wlx"].iter().any(|marker| t.contains(marker)) {
+        return Some(EventKind::WifiRoamStart);
+    }
+    if t.contains(": associated")
+        && ["wlan", "wlp", "wlx"].iter().any(|marker| t.contains(marker)) {
+        return Some(EventKind::WifiAssociated);
+    }
+    if t.contains("scheduled restart job") && t.contains(".service:") {
+        return Some(EventKind::ServiceRestartScheduled);
+    }
+    if t.contains("usb disconnect, device number") {
+        return Some(EventKind::UsbDisconnect);
+    }
+    if t.contains("stop submitting intr, status -71") && t.contains("r8152") {
+        return Some(EventKind::UsbTransportError);
+    }
 
     if ["too many open files", "file table overflow", "emfile", "enfile"]
         .iter().any(|p| t.contains(p)) {
@@ -765,6 +831,46 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_manjaro_journal_classifies_wifi_recovery_usb_and_restart() {
+        let logs = concat!(
+            "1794499282.0 host kernel: usb 1-5.1: USB disconnect, device number 7\n",
+            "1794499303.0 host kernel: usb 1-1: USB disconnect, device number 2\n",
+            "1794499303.1 host kernel: usb 1-1.1: USB disconnect, device number 9\n",
+            "1794499303.2 host kernel: usb 1-1.2: USB disconnect, device number 4\n",
+            "1794499327.0 host kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff (Reason: 2=PREV_AUTH_NOT_VALID)\n",
+            "1794499345.0 host kernel: wlan0: associated\n",
+            "1794499399.0 host kernel: wlan0: deauthenticating from aa:bb:cc:dd:ee:ff by local choice (Reason: 3=DEAUTH_LEAVING)\n",
+            "1794499399.1 host kernel: wlan0: associated\n",
+            "1794496601.0 host systemd[1]: lightdm.service: Main process exited, code=exited, status=1/FAILURE\n",
+            "1794496601.1 host systemd[1]: lightdm.service: Scheduled restart job, restart counter is at 1.\n",
+            "1794499346.0 host kernel: [UFW BLOCK] IN=wlan0 OUT= SRC=192.168.0.20 DST=224.0.0.252 PROTO=UDP DPT=5355\n"
+        );
+        let events = parse_journal(logs);
+        assert_eq!(events.iter().filter(|e| e.kind == EventKind::UsbDisconnect).count(), 4);
+        assert_eq!(events.iter().filter(|e| e.kind == EventKind::LinkDown).count(), 1);
+        assert_eq!(events.iter().filter(|e| e.kind == EventKind::WifiRoamStart).count(), 1);
+        assert_eq!(events.iter().filter(|e| e.kind == EventKind::WifiAssociated).count(), 2);
+        assert_eq!(events.iter().filter(|e| e.kind == EventKind::ServiceRestartScheduled).count(), 1);
+        assert!(!events.iter().any(|e| e.source.as_deref() == Some("ufw")));
+        assert!(events.iter().any(|e| e.kind == EventKind::UsbDisconnect
+            && e.subject.as_deref() == Some("1-5.1")));
+    }
+
+    #[test]
+    fn network_drop_delta_requires_two_valid_monotonic_samples() {
+        let before = vec![InterfaceStats {name:"wlan0".into(),operstate:Some("up".into()),
+            rx_errors:0,rx_dropped:100,tx_errors:0,tx_dropped:5}];
+        let after = vec![InterfaceStats {name:"wlan0".into(),operstate:Some("up".into()),
+            rx_errors:0,rx_dropped:112,tx_errors:0,tx_dropped:7}];
+        let delta = compare_interface_drops(&before, &after, 2000);
+        assert_eq!(delta[0].rx_dropped_delta, 12);
+        assert_eq!(delta[0].tx_dropped_delta, 2);
+        assert!(compare_interface_drops(&before, &after, 0).is_empty());
+        assert!(compare_interface_drops(&after, &before, 2000).is_empty(),
+            "reset/decrease is not new packet loss");
+    }
 
     #[test]
     fn journal_sampling_uses_extra_entry_to_detect_actual_truncation() {
