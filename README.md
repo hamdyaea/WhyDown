@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/whydown-logo.svg" alt="WhyDown WD diagnostics logo" width="760">
+</p>
+
 # WhyDown
 
 **Linux diagnostics with evidence — without changing your system.**
@@ -84,6 +88,9 @@ The GUI starts in **Dark** mode on first launch. Change **Appearance** to
 
 # Show every CLI option
 ~/.local/bin/whydown --help
+
+# Show the WD project logo in ASCII
+~/.local/bin/whydown logo
 ```
 
 ## Update WhyDown
