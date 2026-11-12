@@ -18,6 +18,7 @@ pub fn snapshot() -> Snapshot {
         interfaces: vec![InterfaceStats {
             name: "wlan0".into(), operstate: Some("up".into()), rx_errors: 0, rx_dropped: 1, tx_errors: 0, tx_dropped: 0,
         }],
+        interface_drop_deltas: None,
         failed_units: vec!["example-backup.service".into()],
         system_units_checked: true,
         failed_user_units: Some(vec![]),
