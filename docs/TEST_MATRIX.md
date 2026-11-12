@@ -121,3 +121,10 @@ Run `whydown diagnose --focus system --current-boot --since 24h` and `whydown di
 - Automated: forcing progress on redirected stderr still produces machine-readable JSON on stdout and progress on stderr; suppressing it produces no progress output.
 - Automated: progress thread is joined on normal completion and early errors; the report is not marked 100% complete on write failure.
 - Manual pending: confirm smooth animated TTY bar during the potentially slow `pacman -Dk` / `journalctl` phases on Manjaro, Raspberry Pi OS and Debian 13. Avoid interpreting phase percentages as remaining time.
+
+
+## v0.5.2 slow filesystem collection regression
+
+On Manjaro x86_64, the first v0.5.0 run took noticeably longer than expected and reported `Filesystem usage unavailable`; a subsequent v0.5.0 JSON report successfully listed disks, including `/mnt/onedrive`. The v0.5.1 run took about two seconds and collected local disk/inode data. **The source of the original delay is unconfirmed** because timings were not captured.
+
+Automated tests now cover `df -PT/-Pi --local` with known network-backed FUSE exclusions, explicit `--include-remote-mounts` opt-in, resilient partial `df` parsing, and safe collector timing recording/serialization. Manually compare v0.5.2 default and `--include-remote-mounts` on Manjaro, capturing `collector_timings`, and confirm that normal local disk usage is still reported. Do not deliberately stall remote mounts on production systems.

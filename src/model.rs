@@ -270,6 +270,14 @@ pub struct RaidHealth {
     pub active: u32,
 }
 
+/// Bounded per-command timing; does not contain command outputs or user paths.
+#[derive(Debug, Clone)]
+pub struct CollectorTiming {
+    pub name: &'static str,
+    pub elapsed_ms: u64,
+    pub succeeded: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
@@ -307,6 +315,8 @@ pub struct Snapshot {
     /// True when journalctl was invoked with --boot=0.
     pub journal_current_boot_only: bool,
     pub notes: Vec<String>,
+    /// Measured local collector durations (not estimated).
+    pub collector_timings: Vec<CollectorTiming>,
 }
 
 impl Default for Snapshot {
@@ -339,6 +349,7 @@ impl Default for Snapshot {
             events: Vec::new(),
             journal_current_boot_only: false,
             notes: Vec::new(),
+            collector_timings: Vec::new(),
         }
     }
 }

@@ -171,6 +171,15 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    if !report.snapshot.collector_timings.is_empty() {
+        writeln!(out, "COLLECTOR TIMINGS (measured wall time)").unwrap();
+        for timing in &report.snapshot.collector_timings {
+            writeln!(out, "  {}: {} ms ({})", timing.name, timing.elapsed_ms,
+                if timing.succeeded { "success" } else { "incomplete or failed" }).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
     if !report.snapshot.notes.is_empty() {
         writeln!(out, "COLLECTION LIMITATIONS").unwrap();
         for note in &report.snapshot.notes {
@@ -406,6 +415,11 @@ pub fn json(report: &Report) -> String {
             ("subject", opt_str(&event.subject)),
             ("source", opt_str(&event.source)),
         ])).collect())),
+        ("collector_timings", arr(s.collector_timings.iter().map(|timing| object(vec![
+            ("name", js(timing.name)),
+            ("elapsed_ms", n(timing.elapsed_ms)),
+            ("succeeded", JsonValue::Bool(timing.succeeded)),
+        ])).collect())),
         ("collection_notes", arr(s.notes.iter().cloned().map(js).collect())),
         ("privacy", js("No raw journal lines; includes bounded source, unit, and interface identifiers and local mountpoints")),
         ("disclaimer", js("Observations and hypotheses, not verified root causes")),
@@ -581,6 +595,15 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         }
         out.push_str("</div>");
     }
+    if !report.snapshot.collector_timings.is_empty() {
+        out.push_str("<h2>Collector timings</h2><p class=\"muted\">Actual elapsed time for each local subprocess; no estimated ETA.</p><ul>");
+        for timing in &report.snapshot.collector_timings {
+            write!(out, "<li><code>{}</code>: {} ms ({})</li>",
+                html_escape(timing.name), timing.elapsed_ms,
+                if timing.succeeded { "success" } else { "incomplete or failed" }).unwrap();
+        }
+        out.push_str("</ul>");
+    }
     if !report.snapshot.notes.is_empty() {
         out.push_str("<h2>Collection limitations</h2><ul>");
         for note in &report.snapshot.notes { write!(out, "<li>{}</li>", html_escape(note)).unwrap(); }
@@ -595,6 +618,15 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn collector_timings_remain_in_reports_without_raw_output() {
+        let report = engine::analyze(demo::snapshot(), 3600, Focus::All, true);
+        assert!(text(&report).contains("COLLECTOR TIMINGS"));
+        assert!(json(&report).contains("\"collector_timings\""));
+        assert!(json(&report).contains("\"elapsed_ms\": 0"));
+        assert!(html(&report).contains("Collector timings"));
+    }
 
     #[test]
     fn pacman_check_is_separate_in_text_html_and_json() {
