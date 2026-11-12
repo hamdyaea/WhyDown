@@ -53,8 +53,8 @@ try:
 
     # Verify Ctrl+C handler, including partial text from a disabled widget.
     gui.detail.tag_remove("sel", "1.0", "end")
-    gui.detail.tag_add("sel", "3.0", "3.8")
-    expected = gui.detail.get("3.0", "3.8")
+    gui.detail.tag_add("sel", "4.0", "4.8")
+    expected = gui.detail.get("4.0", "4.8")
     assert gui.on_copy_text(type("Event", (), {"widget": gui.detail})()) == "break"
     assert root.clipboard_get() == expected
 
