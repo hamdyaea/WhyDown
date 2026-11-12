@@ -138,6 +138,25 @@ pub fn assess(s: &Snapshot, out: &mut Vec<Finding>) {
         }
     }
     for p in &s.pressure_health {
+        // CPU PSI "some" captures runnable tasks delayed on CPU. Sustained
+        // contention may be intentional (e.g. rendering/mining); inform rather
+        // than mark the host as failed.
+        if p.resource == "cpu" {
+            if let Some(some) = p.some_avg60_x100 {
+                if some >= 9000 {
+                    out.push(Finding {
+                        id: "CPU_CONTENTION_PRESSURE",
+                        severity: Severity::Info,
+                        confidence: Confidence::Observed,
+                        title: "High sustained CPU contention was measured".into(),
+                        explanation: "CPU PSI some avg60 exceeded 90%, meaning runnable tasks experienced delays from CPU availability. This may be expected during intentional compute-intensive workloads and is not proof of a fault.".into(),
+                        evidence: vec![format!("CPU PSI some avg60: {}.{:02}% over 60s",
+                            some / 100, some % 100)],
+                        checks: vec!["Inspect /proc/pressure/cpu, process CPU demand and cgroup limits before deciding whether contention is abnormal".into()],
+                    });
+                }
+            }
+        }
         let (id, threshold, title, explanation, check) = match p.resource.as_str() {
             "memory" => ("MEMORY_STALL_PRESSURE", 1000, "Sustained severe memory stall pressure",
                 "Memory PSI full avg60 indicates a substantial fraction of the past minute with all non-idle tasks stalled; it does not identify a cause.",
@@ -222,6 +241,20 @@ mod tests {
         let mut v = vec![]; assess(&s, &mut v);
         assert_eq!(v.iter().filter(|f| f.id == "MD_RAID_DEGRADED").count(), 1);
     }
+    #[test]
+    fn cpu_contention_is_informational_not_a_fault() {
+        let mut s = Snapshot::default();
+        s.pressure_health.push(PressureHealth {
+            resource: "cpu".into(), some_avg60_x100: Some(9500),
+            full_avg60_x100: Some(0),
+        });
+        let mut findings = Vec::new();
+        assess(&s, &mut findings);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "CPU_CONTENTION_PRESSURE");
+        assert_eq!(findings[0].severity, Severity::Info);
+    }
+
     #[test]
     fn memory_and_io_sustained_thresholds() {
         let mut s = Snapshot::default();
