@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.9.2] - 2026-11-12
+
+### Desktop usability
+- Make detailed findings/evidence and coverage results explicitly selectable, including partial passages. Keep text read-only while preserving selection when focus moves to toolbar/context actions.
+- Add `Ctrl+C` and `Ctrl+Insert` copy shortcuts, `Ctrl+A` text selection, right-click menus with **Copy selected text** / **Select all text**, and a visible **Copy selection** button.
+- Enable copying selected findings or timeline rows as tab-separated text using the same button, keyboard shortcuts or a row context menu.
+- Copy **only** explicitly selected text/rows to the local system clipboard; no background copying, no telemetry, no full report export, and no accidental entire-report fallback for an empty text selection. Expose concise status feedback.
+- Extend the real Tk/Xvfb GUI smoke suite to test partial evidence and coverage copying, keyboard handlers, timeline row copies, contextual bindings and empty-selection safety.
+
+### Compatibility
+- CLI, TUI, underlying Rust diagnostics, report schema v2 and existing optional Python/Tk GUI dependencies remain unchanged. Manual validation of clipboard integration on Manjaro/X11 or XWayland is still pending.
+
 ## [0.9.1] - 2026-11-12
 
 ### Installer usability

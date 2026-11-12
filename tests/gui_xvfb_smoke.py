@@ -39,6 +39,60 @@ try:
     assert "disabled" not in gui.save_button.state()
     assert gui.tabs.tab(gui.tabs.select(), "text") == "Findings & evidence"
     assert gui.coverage.get("1.0", "end").find("COLLECTION COVERAGE") != -1
+    assert len(gui.context_menus) == 4
+    assert gui.detail.cget("exportselection") == 0
+    assert gui.detail.cget("state") == "disabled"
+
+    # Select only a short fragment, never the complete diagnostic report.
+    gui.detail.tag_add("sel", "1.0", "1.8")
+    expected = gui.detail.get("1.0", "1.8")
+    gui.copy_active_selection()
+    assert root.clipboard_get() == expected, "Copy selection button copied unrelated text"
+    assert "Copied 8 character(s)" in gui.status.get()
+    assert gui.detail.get("1.0", "end").count("OBSERVED EVIDENCE") == 1
+
+    # Verify Ctrl+C handler, including partial text from a disabled widget.
+    gui.detail.tag_remove("sel", "1.0", "end")
+    gui.detail.tag_add("sel", "4.0", "4.8")
+    expected = gui.detail.get("4.0", "4.8")
+    assert gui.on_copy_text(type("Event", (), {"widget": gui.detail})()) == "break"
+    assert root.clipboard_get() == expected
+
+    # A toolbar click should preserve selection even when focus moves.
+    assert gui.detail.cget("exportselection") == 0
+    gui.detail.tag_remove("sel", "1.0", "end")
+    root.clipboard_clear()
+    assert gui.copy_text_selection(gui.detail) is False
+    assert "Select some text" in gui.status.get()
+    try:
+        root.clipboard_get()
+    except tk.TclError:
+        pass
+    else:
+        raise AssertionError("Empty selection must not leak the full report")
+
+    # Coverage supports arbitrary substring selection, not only whole reports.
+    gui.tabs.select(2)
+    gui.coverage.tag_add("sel", "1.0", "1.10")
+    expected = gui.coverage.get("1.0", "1.10")
+    assert gui.copy_active_selection()
+    assert root.clipboard_get() == expected
+
+    # Timeline: selecting an entry copies one row (not all journal entries).
+    gui.tabs.select(1)
+    rows = gui.event_tree.get_children()
+    assert rows, "Demo report should include a classified event"
+    gui.event_tree.selection_set(rows[0])
+    expected = gui.selected_rows(gui.event_tree)
+    assert gui.copy_active_selection()
+    assert root.clipboard_get() == expected
+    assert chr(9) in expected, "Timeline rows should have tab-separated columns"
+
+    # Context menu and Ctrl+C bindings are explicitly installed.
+    assert gui.detail.bind("<Button-3>")
+    assert gui.detail.bind("<Control-c>")
+    assert gui.coverage.bind("<Control-c>")
+    assert gui.event_tree.bind("<Control-c>")
     print("Real Tk GUI smoke test (fictional demo only): passed")
 finally:
     gui.close()
