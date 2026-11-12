@@ -267,3 +267,13 @@ A real Manjaro user reported that a diagnostic ran but subsequent numeric menu s
 Fixes: explicit selection/Enter instructions, visible change confirmations for focus/lookback/boot/cap, no post-diagnostic pause, and forwarding of a numeric action entered at a detail-screen continue prompt. Existing read-only collectors and the JSON-v2 report schema are unchanged. Added deterministic Rust regression tests and a Linux PTY smoke test using Python stdlib (`tests/tui_pty_smoke.py`) to exercise an actual `tui --demo` terminal session, navigating `2 → 5 → 1 → 6 → finding 1 → 7 → return → 0`.
 
 **Validation status:** CI's real PTY script and unit/integration tests are required before release. Confirmation from a published v0.8.1 binary on the user's actual terminal remains pending.
+
+## v0.9.0 guided terminal + desktop GUI (Linux CI, manual desktop pending)
+
+- The guided CLI/TUI startup settings now select focus `all`, `--since 4h`, current-boot-only and a 10,000-entry journal cap, while the default noninteractive CLI remains unchanged at 24h/5,000/all accessible boots.
+- The terminal dashboard marks option 1 as **START HERE** and displays the first five findings immediately after a diagnostic. Option 6 is retained for detailed evidence. Rust regression tests and real pseudo-terminal navigation smoke tests cover the interactive workflow.
+- The optional `whydown gui` frontend embeds Python/Tkinter in the Rust binary; no new Rust dependencies or active network probes are introduced. Pure Python tests verify safe command construction, bounds, JSON schema v2, finding explanations and current systemd/coverage representation without a graphical display.
+- CI installs Tkinter and Xvfb only in the test runner and launches an actual Tk window. The GUI smoke test exercises `--demo` (fictional data), one-click collection, automatic results, initial `all`/4h/10,000 settings, and a disabled export control before collecting.
+- The GUI defaults to **all** checks and offers explicit opt-in remote mount/directory scans; saved JSON requires a user-selected path, uses exclusive creation and private permissions, and does not trigger automatic network or service changes.
+- Installer smoke test validates `--desktop` with a temporary `XDG_DATA_HOME`, verifies the generated XDG application launcher, and checks that normal installation still requires no Tk or system-level GUI configuration.
+- Real interactive GUI testing on Manjaro (X11 or XWayland) and published v0.9.0 binary compatibility on other distributions are **pending**; CI is not a substitute for those manual validations.

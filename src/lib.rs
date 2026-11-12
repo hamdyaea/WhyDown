@@ -6,6 +6,7 @@ pub mod cli;
 pub mod collect;
 pub mod demo;
 pub mod engine;
+pub mod gui;
 pub mod health;
 pub mod model;
 pub mod progress;

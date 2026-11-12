@@ -34,6 +34,22 @@ report and requires option 1 to run a fresh diagnostic.
 The first-party CI now includes a Linux pseudo-terminal test that exercises
 real input/output for these transitions, not just in-memory menu fixtures.
 
+## First use: two-step workflow
+
+The interactive terminal dashboard now leads with **START HERE: 1 = Analyze**.
+The default scope is **all** (recommended); the initial journal lookback is
+4h on the current boot with the full 10,000-entry cap, unless you explicitly
+choose another scope. The existing `whydown diagnose` defaults do not change.
+
+After option 1 finishes, the dashboard immediately lists the newest findings
+with their severity. You can read this overview without pressing 6. Option 6
+is only for inspecting the explanations, evidence and suggested checks.
+
+On a graphical Linux desktop, `whydown gui` is even simpler: a single
+**Analyze this computer** button and findings that appear automatically in a
+window. See [desktop guide](GUI.md). The TUI remains useful for SSH and servers
+without a graphical display.
+
 ## Navigation (number + Enter)
 
 The UI is line-oriented by design: no raw terminal mode, ncurses, third-party Rust

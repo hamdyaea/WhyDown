@@ -27,6 +27,12 @@ fn run() -> Result<u8, String> {
             }
             return whydown::tui::run(cli);
         }
+        Command::Gui => {
+            if !cfg!(target_os = "linux") && !cli.tui_demo {
+                return Err("Live GUI diagnostics require Linux; try 'whydown gui --demo' for a fictional session.".into());
+            }
+            return whydown::gui::run(cli);
+        }
         _ => {}
     }
 
