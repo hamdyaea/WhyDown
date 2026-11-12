@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -32,8 +33,14 @@ MAX_REPORT_BYTES = 8 * 1024 * 1024
 def build_command(binary, *, demo=False, focus="all", since="4h",
                   max_events=10000, current_boot=True):
     """Only bounded, known CLI arguments; never use a shell."""
-    if focus not in FOCUSES or since not in LOOKBACKS:
-        raise ValueError("Unsupported diagnostic selection")
+    if focus not in FOCUSES:
+        raise ValueError("Unsupported diagnostic focus")
+    match = re.fullmatch(r"([0-9]+)([mhd])", since)
+    if match is None:
+        raise ValueError("Journal lookback must use minutes, hours or days")
+    seconds = int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
+    if not 60 <= seconds <= 30 * 86400:
+        raise ValueError("Journal lookback must be from one minute to 30 days")
     if str(max_events) not in MAX_EVENTS:
         raise ValueError("Journal cap must be 5000 or 10000")
     command = [os.fspath(binary), "demo" if demo else "diagnose",
@@ -139,7 +146,7 @@ def parse_args(argv=None):
     parser.add_argument("--whydown-bin", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--focus", choices=FOCUSES, default="all")
-    parser.add_argument("--since", choices=LOOKBACKS, default="4h")
+    parser.add_argument("--since", default="4h")
     parser.add_argument("--max-events", choices=(5000, 10000), type=int, default=10000)
     parser.add_argument("--current-boot", action="store_true")
     return parser.parse_args(argv)
@@ -194,7 +201,9 @@ class WhyDownGUI:
         self.focus_box.grid(row=1, column=0, padx=(0, 12), pady=(3, 0))
         ttk.Label(options, text="Journal lookback").grid(row=0, column=1, sticky="w")
         self.since_box = ttk.Combobox(options, textvariable=self.since,
-                                      values=LOOKBACKS, state="readonly", width=10)
+                                      values=(LOOKBACKS if args.since in LOOKBACKS
+                                              else LOOKBACKS + (args.since,)),
+                                      state="readonly", width=10)
         self.since_box.grid(row=1, column=1, padx=(0, 12), pady=(3, 0))
         ttk.Label(options, text="Journal limit").grid(row=0, column=2, sticky="w")
         self.cap_box = ttk.Combobox(options, textvariable=self.max_events,
