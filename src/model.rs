@@ -40,7 +40,10 @@ impl Finding {
             "ROUTE_MISSING" | "IPV4_ROUTE_MISSING" | "DNS_UNCONFIGURED"
             | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS" | "FAILED_USER_SYSTEMD_UNITS"
             | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" | "DPKG_INCOMPLETE_PACKAGES"
-            | "PACMAN_DATABASE_CHECK_FAILED" => "current_snapshot",
+            | "PACMAN_DATABASE_CHECK_FAILED" | "LOW_MEMORY_HEADROOM"
+            | "MEMORY_STALL_PRESSURE" | "IO_STALL_PRESSURE"
+            | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
+            | "MD_RAID_DEGRADED" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" => "unverified",
             _ => "historical_journal",
         }
@@ -230,6 +233,43 @@ pub struct DpkgProblem {
     pub reinstall_required: bool,
 }
 
+/// Linux-wide resource snapshot from /proc/meminfo (host, not cgroup limit).
+#[derive(Debug, Clone)]
+pub struct MemoryHealth {
+    pub total_kib: u64,
+    pub available_kib: u64,
+    pub swap_total_kib: Option<u64>,
+    pub swap_free_kib: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PressureHealth {
+    pub resource: String,
+    /// 60-second PSI stall average, in hundredths of a percent.
+    pub some_avg60_x100: Option<u32>,
+    pub full_avg60_x100: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileHandleHealth {
+    pub allocated: u64,
+    pub unused: u64,
+    pub maximum: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct InodeHealth {
+    pub mountpoint: String,
+    pub used_percent: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct RaidHealth {
+    pub name: String,
+    pub expected: u32,
+    pub active: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
@@ -255,6 +295,12 @@ pub struct Snapshot {
     pub pacman_checked: Option<bool>,
     /// None: not checked; true: pacman -Dk succeeded; false: nonzero exit.
     pub pacman_consistent: Option<bool>,
+    /// Host-level Linux resource probes. None means unavailable, not healthy.
+    pub memory_health: Option<MemoryHealth>,
+    pub pressure_health: Vec<PressureHealth>,
+    pub file_handle_health: Option<FileHandleHealth>,
+    pub inode_health: Vec<InodeHealth>,
+    pub raid_health: Vec<RaidHealth>,
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
@@ -283,6 +329,11 @@ impl Default for Snapshot {
             dpkg_problems: Vec::new(),
             pacman_checked: None,
             pacman_consistent: None,
+            memory_health: None,
+            pressure_health: Vec::new(),
+            file_handle_health: None,
+            inode_health: Vec::new(),
+            raid_health: Vec::new(),
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
