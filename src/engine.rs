@@ -115,7 +115,9 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
 pub fn group_network_incidents(events: &[Event], max_gap_seconds: u64) -> Vec<NetworkIncident> {
     let mut groups: Vec<NetworkIncident> = Vec::new();
     let mut sorted: Vec<&Event> = events.iter()
-        .filter(|event| event.kind.focus() == Focus::Network).collect();
+        .filter(|event| matches!(event.kind,
+            EventKind::LinkDown | EventKind::DhcpProblem | EventKind::DnsProblem
+            | EventKind::NetworkUnreachable)).collect();
     sorted.sort_by_key(|event| event.timestamp);
     for event in sorted {
         // Group by interface when known; never silently combine wlan0 with eth0.
@@ -264,6 +266,14 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
                     format!("First observed: {}", timestamps(events, EventKind::LinkDown, 1).join(", ")),
                 ];
                 if !interfaces.is_empty() { items.push(format!("Interface(s): {}", interfaces.join(", "))); }
+                if let Some((before, after, iface)) = nearby_matching_subjects(
+                    events, EventKind::LinkDown, EventKind::WifiAssociated, 120
+                ) {
+                    items.push(format!(
+                        "Subsequent Wi-Fi association on {iface}: {} ({} seconds after link event); Internet access not verified",
+                        utc_timestamp(after), after.saturating_sub(before)
+                    ));
+                }
                 items
             },
             checks: vec!["Inspect access point/router logs and interface carrier or Wi-Fi signal".into(), "Check NetworkManager or systemd-networkd logs around the timestamps".into()],
@@ -333,6 +343,39 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
         });
     }
 
+    if let Some((start, end, iface)) = nearby_matching_subjects(
+        events, EventKind::WifiRoamStart, EventKind::WifiAssociated, 30
+    ) {
+        findings.push(Finding {
+            id: "WIFI_LOCAL_ROAM_OBSERVED",
+            severity: Severity::Info,
+            confidence: Confidence::Observed,
+            title: "Wi-Fi handoff followed by association".into(),
+            explanation: "The driver reported deauthentication by local choice followed by association on the same interface. This may be normal access-point roaming; it does not prove Internet connectivity.".into(),
+            evidence: vec![format!(
+                "{iface}: local-choice deauthentication at {} and association {} seconds later",
+                utc_timestamp(start), end.saturating_sub(start)
+            )],
+            checks: vec!["Inspect NetworkManager roaming decisions and access-point logs only if disruptions are observed".into()],
+        });
+    }
+    if let Some(deltas) = &snapshot.interface_drop_deltas {
+        for delta in deltas.iter().filter(|d| d.elapsed_ms >= 100
+            && d.rx_dropped_delta.saturating_add(d.tx_dropped_delta) >= 10) {
+            findings.push(Finding {
+                id: "RECENT_INTERFACE_DROPS",
+                severity: Severity::Info,
+                confidence: Confidence::Observed,
+                title: format!("Packet-drop counters increased on {}", delta.name),
+                explanation: "Two kernel counter samples taken during this run show an increase. Interface drops do not necessarily mean end-to-end packet loss.".into(),
+                evidence: vec![format!(
+                    "{}: +{} RX drops, +{} TX drops over {} ms",
+                    delta.name, delta.rx_dropped_delta, delta.tx_dropped_delta, delta.elapsed_ms
+                )],
+                checks: vec![format!("Compare repeated ip -s link show dev {} samples and driver logs", delta.name)],
+            });
+        }
+    }
     for iface in &snapshot.interfaces {
         if iface.rx_errors > 0 || iface.tx_errors > 0 {
             findings.push(Finding {
@@ -346,6 +389,21 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             });
         }
     }
+}
+
+/// Pair observations only on the same explicitly identified interface.
+fn nearby_matching_subjects(
+    events: &[Event], before: EventKind, after: EventKind, max_gap: u64,
+) -> Option<(u64, u64, String)> {
+    events.iter().filter(|e| e.kind == before).find_map(|first| {
+        let iface = first.subject.as_ref()?;
+        let later = events.iter().filter(|e|
+            e.kind == after && e.subject.as_ref() == Some(iface)
+                && e.timestamp >= first.timestamp
+                && e.timestamp - first.timestamp <= max_gap
+        ).min_by_key(|e| e.timestamp)?;
+        Some((first.timestamp, later.timestamp, iface.clone()))
+    })
 }
 
 fn adjacent_events(events: &[Event], before: EventKind, after: EventKind, max_delta: u64) -> Option<(u64, u64)> {
@@ -398,6 +456,19 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
         let unknown = events.iter().filter(|e| {
             e.kind == EventKind::ServiceFailure && e.subject.is_none()
         }).count();
+        let matched_restarts: Vec<(String, u64)> = events.iter()
+            .filter(|e| e.kind == EventKind::ServiceFailure)
+            .filter_map(|failure| {
+                let unit = failure.subject.as_ref()?;
+                let restart = events.iter()
+                    .filter(|e| e.kind == EventKind::ServiceRestartScheduled
+                        && e.subject.as_ref() == Some(unit)
+                        && e.timestamp >= failure.timestamp
+                        && e.timestamp - failure.timestamp <= 120)
+                    .min_by_key(|e| e.timestamp)?;
+                Some((unit.clone(), restart.timestamp))
+            })
+            .take(8).collect();
         findings.push(Finding {
             id: "SERVICE_FAILURE_LOGS",
             severity: Severity::Warning,
@@ -415,6 +486,13 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 ];
                 let names = event_subjects(events, EventKind::ServiceFailure);
                 if !names.is_empty() { evidence.push(format!("Identified unit(s): {}", names.join(", "))); }
+                for (unit, when) in &matched_restarts {
+                    evidence.push(format!("{}: restart scheduled at {}; this alone does not confirm recovery",
+                        unit, utc_timestamp(*when)));
+                }
+                if snapshot.system_units_checked && snapshot.failed_units.is_empty() {
+                    evidence.push("Current systemd snapshot has zero failed system units; past failures may have recovered".into());
+                }
                 if let Some(uptime) = snapshot.uptime_seconds {
                     let estimated_boot = generated_at.saturating_sub(uptime);
                     let before_boot = events.iter().filter(|e|
@@ -434,6 +512,24 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 "Check surrounding journal lines: 15/TERM can occur during shutdown; status=1/FAILURE is a real process exit failure".into(),
                 "Inspect automatic restart policies and later recovery messages".into(),
             ],
+        });
+    }
+    if let Some((unit, when)) = events.iter()
+        .filter(|e| e.kind == EventKind::ServiceRestartScheduled)
+        .find_map(|restart| {
+            let unit = restart.subject.as_ref()?;
+            if snapshot.system_units_checked && !snapshot.failed_units.contains(unit) {
+                Some((unit.clone(), restart.timestamp))
+            } else { None }
+        }) {
+        findings.push(Finding {
+            id: "SERVICE_RESTART_OBSERVED",
+            severity: Severity::Info,
+            confidence: Confidence::Limited,
+            title: "Service restart scheduled and unit not currently failed".into(),
+            explanation: "Systemd scheduled a restart and the later failed-unit snapshot does not list that unit. Successful application readiness is not proven.".into(),
+            evidence: vec![format!("{}: restart scheduled at {}; absent from current failed-unit list", unit, utc_timestamp(when))],
+            checks: vec![format!("Confirm current status using systemctl status {} and review subsequent service logs", unit)],
         });
     }
 }
@@ -499,6 +595,17 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
         });
     }
     for disk in &snapshot.disks {
+        if (85..90).contains(&disk.used_percent) {
+            findings.push(Finding {
+                id: "DISK_CAPACITY_WATCH",
+                severity: Severity::Info,
+                confidence: Confidence::Observed,
+                title: format!("Filesystem {} is {}% utilized", disk.mountpoint, disk.used_percent),
+                explanation: "Capacity passed an advisory threshold but is below the 90% warning threshold. Growth and free bytes matter more than one percentage.".into(),
+                evidence: vec![format!("Local df snapshot: {} at {}%", disk.mountpoint, disk.used_percent)],
+                checks: vec!["Monitor filesystem growth and remaining free bytes before considering cleanup".into()],
+            });
+        }
         if disk.used_percent >= 90 {
             let mut evidence = vec![format!("`df -PT` reports {}% used", disk.used_percent)];
             let mut checks = vec!["Inspect `df -hT` and the largest directories before deleting anything".into()];
@@ -533,6 +640,38 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
             });
         }
     }
+    // A group of USB detachments in 30 seconds may represent a single hub
+    // unplugging; do not treat every child as an independent hardware fault.
+    let usb: Vec<&Event> = events.iter().filter(|e| e.kind == EventKind::UsbDisconnect).collect();
+    for start in usb.iter().take(64) {
+        let affected: std::collections::HashSet<String> = usb.iter()
+            .filter(|e| e.timestamp >= start.timestamp && e.timestamp - start.timestamp <= 30)
+            .filter_map(|e| e.subject.clone()).collect();
+        if affected.len() >= 4 {
+            let mut evidence = vec![format!(
+                "{} distinct USB topology paths detached within 30 seconds beginning {}",
+                affected.len(), utc_timestamp(start.timestamp)
+            )];
+            if events.iter().any(|e| e.kind == EventKind::UsbTransportError
+                && e.timestamp.abs_diff(start.timestamp) <= 30) {
+                evidence.push("A nearby Realtek r8152 USB transport error was observed".into());
+            }
+            findings.push(Finding {
+                id: "USB_DISCONNECT_BURST",
+                severity: Severity::Warning,
+                confidence: Confidence::Observed,
+                title: "Multiple USB devices disconnected in one short interval".into(),
+                explanation: "Several USB paths detached close together. A dock or hub being unplugged or powered down is possible; this does not prove a hardware fault or causation of later network events.".into(),
+                evidence,
+                checks: vec![
+                    "Check whether a dock/hub was intentionally unplugged, powered off or reset".into(),
+                    "Inspect kernel USB, xHCI and r8152 messages and physical power/cables if unexpected".into(),
+                ],
+            });
+            break;
+        }
+    }
+
     for (kind, id, title, explain, check) in [
         (EventKind::OutOfMemory, "OOM_EVENTS", "Out-of-memory events reported", "The journal contains messages consistent with memory exhaustion or process termination by an OOM killer.", "Review memory pressure and kernel logs around the event"),
         (EventKind::StorageError, "STORAGE_ERRORS", "Storage errors reported", "The journal contains storage-related error messages; their severity and affected device are not determined by this classifier.", "Inspect kernel storage logs, available disk space and hardware health"),
