@@ -259,3 +259,11 @@ The **installed release executable** completed:
 - Linux x86_64 and ARM64 CI compile/test the same Rust source without new
   third-party crates. Interactive testing on a real Manjaro TTY and over SSH
   is **pending**; no claims of that test are made yet.
+
+## v0.8.1 interactive TUI navigation regression (2026-11-12)
+
+A real Manjaro user reported that a diagnostic ran but subsequent numeric menu selections appeared to do nothing. The v0.8.0 TUI was line-oriented (number + Enter), but the dashboard did not show that requirement. It also paused after the diagnostic and could consume the user's next menu choice without processing it.
+
+Fixes: explicit selection/Enter instructions, visible change confirmations for focus/lookback/boot/cap, no post-diagnostic pause, and forwarding of a numeric action entered at a detail-screen continue prompt. Existing read-only collectors and the JSON-v2 report schema are unchanged. Added deterministic Rust regression tests and a Linux PTY smoke test using Python stdlib (`tests/tui_pty_smoke.py`) to exercise an actual `tui --demo` terminal session, navigating `2 → 5 → 1 → 6 → finding 1 → 7 → return → 0`.
+
+**Validation status:** CI's real PTY script and unit/integration tests are required before release. Confirmation from a published v0.8.1 binary on the user's actual terminal remains pending.
