@@ -7,6 +7,7 @@ PREFIX="${WHYDOWN_PREFIX:-${HOME:-}/.local}"
 LIBC=auto
 MODE=binary
 DRY_RUN=0
+DESKTOP=0
 say() { printf '%s\n' "$*"; }
 fail() { printf 'WhyDown installer: %s\n' "$*" >&2; exit 1; }
 usage() {
@@ -18,6 +19,7 @@ WhyDown Linux installer (x86_64 and aarch64)
   --check-build-prereqs  Explain missing compiler/Cargo prerequisites
   --print-target         Display detected target without installing
   --dry-run              Show selected binary without downloading
+  --desktop              Install an optional local application-menu launcher
   --libc auto|gnu|musl   Auto selects static musl; gnu is opt-in
   --prefix DIR           Install to DIR/bin (default ~/.local/bin)
   --help                 Display this help
@@ -31,6 +33,7 @@ while [ "$#" -gt 0 ]; do
         --check-build-prereqs) MODE=check; shift ;;
         --print-target) MODE=target; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
+        --desktop) DESKTOP=1; shift ;;
         --libc|--prefix)
             [ "$#" -ge 2 ] || fail "Missing value for $1"
             if [ "$1" = --libc ]; then LIBC="$2"; else PREFIX="$2"; fi
@@ -90,6 +93,14 @@ target() {
 }
 if [ "$MODE" = target ]; then target; exit 0; fi
 case "$PREFIX" in /*) ;; *) fail "--prefix must be an absolute path" ;; esac
+if [ "$DESKTOP" -eq 1 ]; then
+    [ -n "${HOME:-}" ] || fail "--desktop requires a home directory"
+    # .desktop Exec does not accept arbitrary shell text; reject unusual paths
+    # instead of interpolating untrusted characters into an application entry.
+    case "$PREFIX/bin/whydown" in
+        *[!A-Za-z0-9_./-]*) fail "--desktop requires a prefix without spaces/special characters" ;;
+    esac
+fi
 if [ "$MODE" = source ]; then
     repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
     [ -f "$repo_dir/Cargo.toml" ] ||
@@ -153,3 +164,32 @@ case ":$PATH:" in *":$PREFIX/bin:"*) ;;
     *) say "If needed: export PATH=\"$PREFIX/bin:\$PATH\"" ;;
 esac
 say "Try: $PREFIX/bin/whydown demo"
+say "GUI (optional Python 3 + Tk): $PREFIX/bin/whydown gui"
+if [ "$DESKTOP" -eq 1 ]; then
+    appdir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    mkdir -p "$appdir" || fail "Cannot create desktop application directory"
+    desktop_tmp=$(mktemp "$appdir/.whydown-app.XXXXXXXX") ||
+        fail "Cannot stage desktop launcher"
+    if ! cat > "$desktop_tmp" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=WhyDown
+GenericName=Linux Diagnostics
+Comment=Evidence-based, read-only Linux troubleshooting
+Exec=$PREFIX/bin/whydown gui
+TryExec=$PREFIX/bin/whydown
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Utility;
+Keywords=Linux;System;Diagnostics;Network;
+EOF
+    then
+        rm -f -- "$desktop_tmp"
+        fail "Cannot create desktop launcher"
+    fi
+    chmod 644 "$desktop_tmp" || { rm -f -- "$desktop_tmp"; fail "Cannot set desktop launcher permissions"; }
+    mv -f -- "$desktop_tmp" "$appdir/whydown.desktop" ||
+        { rm -f -- "$desktop_tmp"; fail "Cannot install desktop launcher"; }
+    say "Desktop launcher: $appdir/whydown.desktop"
+fi
