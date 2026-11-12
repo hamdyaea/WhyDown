@@ -253,6 +253,8 @@ pub struct Snapshot {
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
+    /// True when journalctl was invoked with --boot=0.
+    pub journal_current_boot_only: bool,
     pub notes: Vec<String>,
 }
 
@@ -277,6 +279,7 @@ impl Default for Snapshot {
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
+            journal_current_boot_only: false,
             notes: Vec::new(),
         }
     }
