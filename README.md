@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.6.1 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.7.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -18,6 +18,9 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
 - **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
 - **Service diagnostics (v0.3.1):** separate system/user systemd failed-unit snapshots, plus historical service-message windows that distinguish log entries from independent failures.
+- **Incident recovery and hardware context (v0.7.0):** detects Wi-Fi reassociation after a link loss, separates local-choice roaming from hard disconnects, observes systemd restart scheduling without claiming verified recovery, and groups simultaneous USB detachments into a single possible dock/hub incident.
+- **Measured in-run packet-drop changes (v0.7.0):** captures two read-only /proc/net/dev samples; shows deltas and sample duration separately from cumulative counters. Counter resets or absent comparisons are unknown, not new drops.
+- **Earlier disk capacity advisory (v0.7.0):** 85–89% utilization yields informational DISK_CAPACITY_WATCH; the existing >=90% warning remains unchanged.
 - **Bounded journal coverage made explicit (v0.6.1):** default tail increased from 500 to 5,000 entries; an N+1 sentinel detects actual truncation, and incomplete journal coverage is marked in the diagnostic findings and text/JSON/HTML reports rather than producing a misleading `NO_CLASSIFIED_ANOMALY`.
 - **Accurate evidence and incident attribution (v0.6.0):** fix detection of interface names ending in a colon in kernel journal messages; validate literal DNS nameserver addresses; clearly distinguish missing core evidence from a completed diagnostic with no matching anomalies; expose root mount read-only status and explicit file-descriptor exhaustion events.
 - **Clean progress/report boundaries (v0.5.3):** stops the live progress renderer before writing stdout or announcing a saved file, then emits the final 100% line only on success. Prevents merged terminal text such as `elapsed 1sWhyDown 0.5.2`; interrupted writes are not marked successful.
@@ -50,7 +53,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.6.1/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.7.0/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -112,7 +115,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.6.1
+VERSION=v0.7.0
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -192,7 +195,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.6.1
+./target/release/whydown --version   # expects whydown 0.7.0
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -272,7 +275,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.6.1 [DEMO]
+WhyDown 0.7.0 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -322,6 +325,26 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Memory pressure | `journalctl` | Detects OOM-related messages |
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |
+
+### Correlating incidents and later observations (v0.7.0)
+
+This release adds read-only context based on the real Manjaro logs from 2026-11-12. The journal showed multiple USB detachments in about 19 seconds, a Realtek r8152 error, `wlan0` deauthentication followed by association about 18 seconds later, a later local-choice Wi-Fi handoff with immediate reassociation, and a `lightdm.service` failure followed by a scheduled restart. Those observations do **not** prove the events were causally related.
+
+WhyDown now:
+- Treats **Wi-Fi association** as positive historical evidence. When the same explicitly named interface associates within 120 seconds of a link-loss event, the `LINK_DISCONNECTS` warning records that association, without declaring Internet connectivity restored.
+- Distinguishes **local-choice Wi-Fi handoffs** from link-loss warnings. When a subsequent association is observed on the same interface within 30 seconds, `WIFI_LOCAL_ROAM_OBSERVED` is informational; normal roaming does not automatically mean the network failed.
+- Recognizes `lightdm.service: Scheduled restart job` and other explicitly identified systemd units. The historical `SERVICE_FAILURE_LOGS` warning remains, but it shows the restart scheduling and current failed-unit state. `SERVICE_RESTART_OBSERVED` is informational when the unit is no longer listed as failed; it does not prove application readiness.
+- Detects **USB_DISCONNECT_BURST** when four or more distinct USB topology paths detach within 30 seconds. This may reflect a dock/hub being unplugged or powered off, not a hardware fault. A nearby r8152 USB status error is mentioned only as context, never as proven causation.
+- Samples `/proc/net/dev` twice without an extra delay. The `system.interface_drop_deltas` JSON array records changes and elapsed milliseconds; only an increase of at least 10 drops over at least 100 ms produces the informational `RECENT_INTERFACE_DROPS`. Kernel counters may increase for reasons unrelated to real Internet packet loss. Counter resets are discarded.
+- Adds informational `DISK_CAPACITY_WATCH` at 85–89% used, preserving the warning `DISK_NEAR_FULL` at 90% or more. The Manjaro samples of /home 88% and /opt 86% are advisory, not evidence of a current outage.
+
+Firewall `[UFW BLOCK]` lines are not interpreted as automatic network outages; blocked multicast discovery messages can be normal under the configured rules. No raw USB serials, Wi-Fi BSSIDs, firewall IPs or journal text bodies are retained.
+
+```bash
+whydown diagnose --focus all --current-boot --since 24h --max-events 5000 --progress
+whydown diagnose --focus all --current-boot --format json --output whydown-v070.json
+jq '{findings: [.findings[].id], interface_drops: .system.interface_drop_deltas}' whydown-v070.json
+```
 
 ### Why two similar diagnostics can give different results (v0.6.1)
 
@@ -441,14 +464,14 @@ WhyDown **never executes** either `dpkg --configure -a` or `apt-get -f install`.
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro x86_64 has been manually tested through v0.6.0:** static-musl installation and SHA-256 verification, interactive progress without interleaved report lines, current-boot network/services/system diagnostics, resource PSI/memory/inode snapshots, native pacman consistency, auxiliary dpkg, JSON export and per-collector timings. A representative v0.5.3 run completed in around 2 seconds, reported zero failed system/user units and two historical log warnings (link loss and lightdm), not verified ongoing failures. The v0.6.0 kernel-interface fix has been confirmed live with `wlan0` attribution, boot-filtered journal windows and coverage states. A same-day JSON report with the old 500-entry default missed historical events detected at 5,000 entries; v0.6.1 addresses that discrepancy. Real v0.6.1 field validation is pending. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports on this VM are still pending; user-service diagnostics were subsequently checked successfully with the normal `hamdy` account (zero failed user units). The v0.3.6 dpkg rule was subsequently **validated live** on the same Debian 13 VM: `--focus all` and `--focus system` both reported `DPKG_INCOMPLETE_PACKAGES` with exactly four affected kernel packages, matching `dpkg --audit` (three unpacked and one half-configured). The diagnostic independently reported zero failed system and user systemd units. JSON/HTML export checks on this VM are still pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro x86_64 has been manually tested through v0.6.0:** static-musl installation and SHA-256 verification, interactive progress without interleaved report lines, current-boot network/services/system diagnostics, resource PSI/memory/inode snapshots, native pacman consistency, auxiliary dpkg, JSON export and per-collector timings. A representative v0.5.3 run completed in around 2 seconds, reported zero failed system/user units and two historical log warnings (link loss and lightdm), not verified ongoing failures. The v0.6.0 kernel-interface fix has been confirmed live with `wlan0` attribution, boot-filtered journal windows and coverage states. A same-day JSON report with the old 500-entry default missed historical events detected at 5,000 entries; v0.6.1 addresses that discrepancy. v0.6.1 was subsequently tested live: a 4,598-entry current-boot window was not truncated, and both text and JSON consistently retained the historical wlan0 and lightdm warnings. The new v0.7.0 correlations still need a real on-host test. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports on this VM are still pending; user-service diagnostics were subsequently checked successfully with the normal `hamdy` account (zero failed user units). The v0.3.6 dpkg rule was subsequently **validated live** on the same Debian 13 VM: `--focus all` and `--focus system` both reported `DPKG_INCOMPLETE_PACKAGES` with exactly four affected kernel packages, matching `dpkg --audit` (three unpacked and one half-configured). The diagnostic independently reported zero failed system and user systemd units. JSON/HTML export checks on this VM are still pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.6.1 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.7.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -529,10 +552,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.5.3 (released):** prevent progress/JSON or progress/text collisions and duplicate completion lines, keeping the final 100% status conditional on successfully written output; validate Manjaro v0.5.2 field timings.
 - **v0.6.0 (released):** fix kernel interface attribution, validate DNS IP literals, distinguish missing evidence from no anomaly, record boot-filtered incident provenance, and add informational root/CPU observations plus historical file descriptor exhaustion classification.
 - **v0.6.1 (released):** increase default journal tail to 5,000, detect true truncation with N+1 sentinel, explicitly disclose partial journal coverage and prevent misleading no-anomaly conclusions when older entries were excluded.
+- **v0.7.0 (released):** correlate Wi-Fi reassociation and local-choice roaming, systemd restart scheduling, and USB-detachment bursts; sample network drop counter deltas; add informational 85–89% disk utilization advice.
 - **v0.5 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.6.1: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.7.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
