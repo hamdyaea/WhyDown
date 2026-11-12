@@ -211,6 +211,12 @@ pub fn text(report: &Report) -> String {
 /// Derived from wall clock minus uptime, not a journal boot ID; clock changes
 /// can make this estimate inaccurate.
 fn boot_relation(report: &Report, start: u64, end: u64) -> &'static str {
+    // journalctl --boot=0 already filters to the running boot. Do not
+    // downgrade verified boot selection to an uptime-based heuristic.
+    if report.snapshot.journal_current_boot_only
+        && report.snapshot.journal_checked && !report.demo {
+        return "current_boot_filtered";
+    }
     let Some(uptime) = report.snapshot.uptime_seconds else { return "unknown"; };
     let cutoff = report.generated_at.saturating_sub(uptime);
     if end < cutoff { "before_current_boot_estimate" }
@@ -742,6 +748,17 @@ mod tests {
         assert!(!plain.contains("1 events"));
         let html_page = html(&report);
         assert!(html_page.contains("1 classified entry; 0 without unit attribution."));
+    }
+
+    #[test]
+    fn requested_current_boot_is_verified_when_journal_was_collected() {
+        let mut report = engine::analyze(demo::snapshot(), 3_600, Focus::All, false);
+        report.snapshot.journal_current_boot_only = true;
+        report.snapshot.journal_checked = true;
+        report.snapshot.uptime_seconds = None;
+        assert_eq!(boot_relation(&report, 100, 200), "current_boot_filtered");
+        report.snapshot.journal_checked = false;
+        assert_eq!(boot_relation(&report, 100, 200), "unknown");
     }
 
     #[test]
