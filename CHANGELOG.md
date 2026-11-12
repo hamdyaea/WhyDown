@@ -2,6 +2,19 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.4.0] - 2026-11-12
+
+### Added
+- `--current-boot` (alias `--since-boot`) restricts journal evidence to the active Linux boot using `journalctl --boot=0`, combined with the requested `--since` window. The same scope is exposed in text, HTML and JSON schema v2 (`journal_current_boot_only`).
+- `--exit-on-warning` gives automation a stable opt-in exit status: 0 after a successfully generated report without warning findings, 1 after a successfully generated report containing warnings, 2 for command or output errors. The default exit policy is unchanged.
+- Safe, private report overwrite: stage on the destination filesystem, sync and atomically rename. Existing reports survive incomplete writes.
+- Time-limited and output-bounded subprocess collection (20s ordinary commands, 45s journalctl, 120s optional du; 16 MiB stdout limit or 32 MiB for journalctl) to avoid indefinite hangs and unlimited memory usage.
+- Unit/integration tests for CLI flags, timeout and output caps, machine-readable boot scope, warning exit policy, output replacement and 0600 permissions.
+
+### Compatibility
+- No new third-party Rust dependencies; read-only/offline diagnostic engine, existing finding IDs, installer ABI policy and JSON schema v2 remain unchanged.
+- Current-boot filtering is opt-in; previous-boot journal diagnostics remain the default.
+
 ## [0.3.6] - 2026-11-12
 
 ### Added
