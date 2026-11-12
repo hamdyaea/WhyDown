@@ -335,6 +335,12 @@ mod tests {
     }
 
     #[test]
+    fn standalone_logo_and_icon_commands_parse() {
+        assert_eq!(Cli::parse(["logo"]).unwrap().command, Command::Logo);
+        assert_eq!(Cli::parse(["icon"]).unwrap().command, Command::Icon);
+    }
+
+    #[test]
     fn defaults() {
         let c = Cli::parse(Vec::<String>::new()).unwrap();
         assert_eq!(c.command, Command::Diagnose);
