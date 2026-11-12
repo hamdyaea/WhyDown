@@ -61,6 +61,9 @@ fn run() -> Result<u8, String> {
 
     let should_fail = cli.exit_on_warning &&
         report.findings.iter().any(|f| f.severity == Severity::Warning);
+    // A live progress redraw must not overlap with the report written to
+    // stdout or with the "Report saved to" stderr notification.
+    progress.prepare_for_output();
     match cli.output {
         Some(path) if path.to_string_lossy() != "-" => {
             save_report(&path, output.as_bytes(), cli.overwrite)?;
