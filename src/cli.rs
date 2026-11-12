@@ -38,6 +38,8 @@ pub struct Cli {
     pub output: Option<PathBuf>,
     pub overwrite: bool,
     pub disk_details: bool,
+    /// Opt in to remote filesystems and known network-backed FUSE types.
+    pub include_remote_mounts: bool,
     /// Restrict journal observations to the currently running Linux boot.
     pub current_boot: bool,
     /// For automation: exit with status 1 when a warning is present.
@@ -56,6 +58,7 @@ impl Default for Cli {
             output: None,
             overwrite: false,
             disk_details: false,
+            include_remote_mounts: false,
             current_boot: false,
             exit_on_warning: false,
             progress_mode: ProgressMode::Auto,
@@ -97,6 +100,11 @@ impl Cli {
             }
             if flag == "--disk-details" {
                 cli.disk_details = true;
+                i += 1;
+                continue;
+            }
+            if flag == "--include-remote-mounts" {
+                cli.include_remote_mounts = true;
                 i += 1;
                 continue;
             }
@@ -202,6 +210,7 @@ OPTIONS
   --output FILE    write report to a new file (use --overwrite to replace)
   --overwrite      allow replacing an existing output file
   --disk-details   inspect large subdirectories on near-full filesystems (may take time)
+  --include-remote-mounts  include remote/FUSE mounts in disk checks (may hang)
   -h, --help       display help
   -V, --version    display version
 
@@ -250,6 +259,12 @@ mod tests {
         let defaults = Cli::default();
         assert!(!defaults.current_boot);
         assert!(!defaults.exit_on_warning);
+    }
+
+    #[test]
+    fn remote_mounts_are_opt_in() {
+        assert!(!Cli::default().include_remote_mounts);
+        assert!(Cli::parse(["--include-remote-mounts"]).unwrap().include_remote_mounts);
     }
 
     #[test]
