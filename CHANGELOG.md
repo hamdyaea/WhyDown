@@ -2,6 +2,26 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.9.0] - 2026-11-12
+
+### Desktop GUI
+- New optional **`whydown gui`** command launches a full offline desktop UI using embedded Python 3 / Tkinter, without new Rust crates or a separate GUI download. The normal Rust CLI and remote/headless TUI remain available without Python/Tk.
+- Guided default settings for GUI and TUI: `focus=all`, four-hour current-boot journal window and 10,000 entries; the normal `whydown diagnose` defaults are unchanged. Explicit lookback/focus arguments are preserved.
+- The desktop starts with a prominent **Analyze this computer** button and automatically displays classified findings with explanations, evidence, confidence and suggested checks when collection finishes. Separate tabs show the classified timeline and collector coverage/limitations.
+- GUI runs the same read-only Rust collector without shell invocation on a background worker; shows a clear progress indicator while collecting and does not block the desktop. `whydown gui --demo` uses fictional evidence.
+- Optional read-only disk breakdown and remote mount checks are available as opt-in checkboxes; reports can be saved with explicit user action to a private JSON file (0600, no overwrite). No automatic exports or telemetry.
+- Installer option `sh scripts/install.sh --desktop` creates a user-owned XDG application launcher explicitly, with no sudo or automatic Python/Tk installation.
+
+### Terminal usability
+- TUI dashboard now says **START HERE: 1 = analyze** and clearly explains that `6` opens the evidence only after a diagnostic.
+- Once a run completes, a brief list of findings is visible immediately on the dashboard; the user no longer needs to navigate into a separate menu merely to discover what was found.
+
+### Tests and compatibility
+- Added pure Python GUI model tests for JSON-v2 parsing, data scope and read-only command construction. Added a real GUI smoke test under an Xvfb virtual display, opening Tk and running a fictional diagnostic; these tests run in normal and release CI.
+- Existing Rust TUI PTY smoke checks updated for the new interactive 10,000-entry default; installer smoke checks the optional XDG shortcut using an isolated `XDG_DATA_HOME`.
+- Existing CLI JSON schema v2 and rules remain unchanged. Python/Tk/X11 or XWayland are **optional runtime requirements only for the GUI**; no new external network probes, privileged changes or automatic repair.
+- Real Manjaro desktop GUI validation remains pending, independently of Linux CI and virtual-display smoke tests.
+
 ## [0.8.1] - 2026-11-12
 
 ### Fixed
