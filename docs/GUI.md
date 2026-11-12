@@ -55,7 +55,7 @@ terminal commands do not require Python or PyQt6.
 
 Use the **Appearance** menu at the top right of the Qt6 window to choose:
 
-- **System** (the default on first launch): use the desktop theme when Qt
+- **System**: use the desktop theme when Qt
   exposes it. On Qt 6.5+ the app observes platform color-scheme updates and
   switches automatically as your desktop changes. On earlier Qt versions,
   the application falls back to the current Qt desktop palette and follows
@@ -63,6 +63,11 @@ Use the **Appearance** menu at the top right of the Qt6 window to choose:
 - **Light**: always use the clear, light WhyDown layout, independent of OS theme.
 - **Dark**: use the full dark palette for the sidebar, settings, metrics,
   tabs, event lists, evidence editors and text selections.
+
+**Dark is the default only on a fresh installation** (when there is no saved
+appearance preference). Choosing Light or System explicitly preserves that
+choice across restarts, including upgrades; existing settings are never
+silently replaced. Invalid saved values safely fall back to Dark.
 
 The change is immediate: no restart or new diagnostic is required. WhyDown
 **remembers your explicit choice** using a local Qt `QSettings` preference
@@ -118,6 +123,22 @@ overwrites existing files. Nothing is saved or transmitted automatically.
   expose the same underlying report model.
 - Python/PyQt6 are optional *GUI-only* runtime dependencies. Qt visual behavior
   follows desktop font rendering and may vary between distributions.
+
+## README screenshot
+
+The main README includes a screenshot of the **real Qt6 application running
+only fictional demo evidence**, not private host journals. The checked-in
+image is at [`docs/images/whydown-gui-dark.jpg`](images/whydown-gui-dark.jpg)
+and can be regenerated on a Linux desktop with Qt6 and a virtual X display:
+
+```bash
+cargo build --release --locked
+xvfb-run -a python3 scripts/capture_gui_for_readme.py ./target/release/whydown
+```
+
+The generator always starts with isolated appearance preferences, selects the
+first-launch Dark theme and runs `whydown demo`. It does not collect machine
+logs or contact the Internet. Only the generated image needs to be committed.
 
 ## Automated and on-host testing
 

@@ -116,8 +116,8 @@ QProgressBar::chunk { background: #3ad2bf; }
 """
 
 def normalize_theme(value):
-    """Never feed untrusted/persisted values into the theme selection."""
-    return value if isinstance(value, str) and value in THEMES else "system"
+    """Unknown values, including absent/invalid preferences, default to Dark."""
+    return value if isinstance(value, str) and value in THEMES else "dark"
 
 
 def resolve_theme(preference, system_dark):
@@ -252,7 +252,7 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.err = bytearray()
         self.settings = QtCore.QSettings("WhyDown", "WhyDown")
         self.theme_preference = normalize_theme(
-            self.settings.value(THEME_SETTINGS_KEY, "system", type=str))
+            self.settings.value(THEME_SETTINGS_KEY, "dark", type=str))
         self.effective_theme = None
         self.setWindowTitle("WhyDown  |  Linux system diagnostics")
         self.setMinimumSize(980, 640)

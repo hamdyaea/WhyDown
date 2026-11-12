@@ -55,13 +55,13 @@ class TestWhyDownGUI(unittest.TestCase):
 
     def test_theme_preferences_and_palette_selection(self):
         self.assertEqual(gui.THEMES, ("system", "light", "dark"))
-        self.assertEqual(gui.normalize_theme("garbage"), "system")
-        self.assertEqual(gui.normalize_theme(None), "system")
+        self.assertEqual(gui.normalize_theme("garbage"), "dark")
+        self.assertEqual(gui.normalize_theme(None), "dark")
         self.assertEqual(gui.resolve_theme("system", True), "dark")
         self.assertEqual(gui.resolve_theme("system", False), "light")
         self.assertEqual(gui.resolve_theme("dark", False), "dark")
         self.assertEqual(gui.resolve_theme("light", True), "light")
-        self.assertEqual(gui.resolve_theme("invalid", True), "dark")
+        self.assertEqual(gui.resolve_theme("invalid", False), "dark")
         self.assertIn("QPlainTextEdit", gui.stylesheet_for("dark", False))
         self.assertIn("#152338", gui.stylesheet_for("dark", False))
         self.assertIn("#f2f6fb", gui.stylesheet_for("light", True))
