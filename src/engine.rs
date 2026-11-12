@@ -505,6 +505,13 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 for (unit, when) in &matched_restarts {
                     evidence.push(format!("{}: restart scheduled at {}; this alone does not confirm recovery",
                         unit, utc_timestamp(*when)));
+                    if let Some(state) = snapshot.service_statuses.iter().find(|s| &s.unit == unit) {
+                        evidence.push(format!(
+                            "{}: current system-manager state is {}/{} (result={}, restarts={}); this is not application readiness",
+                            unit, state.active_state, state.sub_state, state.result,
+                            state.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+                        ));
+                    }
                 }
                 if snapshot.system_units_checked && snapshot.failed_units.is_empty() {
                     evidence.push("Current systemd snapshot has zero failed system units; past failures may have recovered".into());
@@ -538,14 +545,30 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 Some((unit.clone(), restart.timestamp))
             } else { None }
         }) {
+        let state = snapshot.service_statuses.iter().find(|s| s.unit == unit);
+        let mut evidence = vec![format!(
+            "{}: restart scheduled at {}; absent from current failed-unit list",
+            unit, utc_timestamp(when)
+        )];
+        if let Some(state) = state {
+            evidence.push(format!(
+                "Current systemctl show: load={}, active={}, sub={}, result={}, NRestarts={}",
+                state.load_state, state.active_state, state.sub_state, state.result,
+                state.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+            ));
+        }
         findings.push(Finding {
             id: "SERVICE_RESTART_OBSERVED",
             severity: Severity::Info,
-            confidence: Confidence::Limited,
-            title: "Service restart scheduled and unit not currently failed".into(),
-            explanation: "Systemd scheduled a restart and the later failed-unit snapshot does not list that unit. Successful application readiness is not proven.".into(),
-            evidence: vec![format!("{}: restart scheduled at {}; absent from current failed-unit list", unit, utc_timestamp(when))],
-            checks: vec![format!("Confirm current status using systemctl status {} and review subsequent service logs", unit)],
+            confidence: if state.is_some() { Confidence::Observed } else { Confidence::Limited },
+            title: if state.is_some_and(|s| s.active_state == "active") {
+                "Service restart scheduled; unit currently active in systemd"
+            } else {
+                "Service restart scheduled; current unit readiness not verified"
+            }.into(),
+            explanation: "Systemd scheduled a restart. A separate read-only system-manager snapshot may confirm the unit is currently active, but cannot prove the application is ready, or that it ran continuously after the failure.".into(),
+            evidence,
+            checks: vec![format!("Review surrounding journal and service/application health for {}", unit)],
         });
     }
 }
@@ -774,6 +797,37 @@ mod tests {
         assert!(service.evidence.iter().any(|x| x.contains("restart scheduled")));
         assert_eq!(report.network_incidents.len(), 1,
             "positive reassociation alone must not create an incident window");
+    }
+
+    #[test]
+    fn active_unit_snapshot_enriches_restart_without_erasing_failure() {
+        let events = vec![
+            Event {timestamp: 100, kind: EventKind::ServiceFailure,
+                subject: Some("lightdm.service".into()), source: Some("systemd".into())},
+            Event {timestamp: 100, kind: EventKind::ServiceRestartScheduled,
+                subject: Some("lightdm.service".into()), source: Some("systemd".into())},
+        ];
+        let report = analyze(Snapshot {
+            system_units_checked: true,
+            failed_units: vec![],
+            events,
+            service_statuses: vec![crate::model::ServiceStatus {
+                unit: "lightdm.service".into(),
+                load_state: "loaded".into(),
+                active_state: "active".into(),
+                sub_state: "running".into(),
+                result: "success".into(),
+                n_restarts: Some(1),
+            }],
+            ..Snapshot::default()
+        }, 3600, Focus::Services, false);
+        assert!(report.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+        let restart = report.findings.iter().find(|f|
+            f.id == "SERVICE_RESTART_OBSERVED").unwrap();
+        assert_eq!(restart.confidence, Confidence::Observed);
+        assert!(restart.evidence.iter().any(|text|
+            text.contains("active=active") && text.contains("NRestarts=1")));
+        assert!(restart.explanation.contains("cannot prove the application is ready"));
     }
 
     #[test]
