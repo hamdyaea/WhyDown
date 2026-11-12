@@ -1,0 +1,25 @@
+name: Temporary README screenshot capture
+
+on:
+  push:
+    branches:
+      - docs/short-readme-dark-first-launch-v0.10.2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build WhyDown
+        run: cargo build --release --locked
+      - name: Install Qt6 and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pyqt6 xvfb
+      - name: Generate original demo screenshot and emit base64
+        run: xvfb-run -a python3 scripts/capture_gui_for_readme.py ./target/release/whydown --emit-base64 --output /tmp/whydown-gui-dark.jpg
