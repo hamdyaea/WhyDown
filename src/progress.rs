@@ -169,17 +169,20 @@ impl Progress {
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        // Early exits must not fake 100% success.
+        // Early exits must not fake 100% success. A successful finish already
+        // printed its final status; never print a duplicate on drop.
+        let mut interrupted = false;
         self.modify(|s| {
             if !s.finished {
                 s.stage = "Diagnostic interrupted".into();
                 s.detail.clear();
                 s.finished = true;
                 s.succeeded = false;
+                interrupted = true;
             }
         });
         if self.worker.is_some() { self.join(); }
-        else { self.print_completion(); }
+        else if interrupted { self.print_completion(); }
     }
 }
 
