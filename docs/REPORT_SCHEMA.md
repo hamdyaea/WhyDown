@@ -80,3 +80,15 @@ Under `system`:
 - `pacman_consistent`: `null` when unchecked, `true` for `pacman -Dk` success and `false` for a nonzero command status.
 
 A nonzero command status emits `PACMAN_DATABASE_CHECK_FAILED` with `scope=current_snapshot` and `confidence=limited`. This does not prove the database is corrupt, all installed files exist or that the machine is healthy. dpkg and pacman databases are checked independently where present.
+
+
+## Additions in WhyDown v0.5.0 (schema remains 2)
+
+The `system` object adds:
+- `memory`: object `{total_kib, available_kib, swap_total_kib, swap_free_kib}` or null if host memory info is unavailable.
+- `pressure`: array of optional CPU/memory/I/O measurements `{resource, some_avg60_percent_x100, full_avg60_percent_x100}`. Numbers represent *hundredths of one percent* of task stall time averaged over 60 seconds. CPU full may be null as it is not necessarily available.
+- `file_handles`: `{allocated, unused, maximum}` (kernel global `file-nr`) or null when unsupported. Subtract unused from allocated for estimated in-use count.
+- `inodes`: array of `{mountpoint, used_percent}` for the writable-capable mounts also recognized by the disk collector.
+- `md_arrays`: array of `{name, expected, active}` for Linux MD arrays with explicit member counts.
+
+The corresponding new warning IDs are `LOW_MEMORY_HEADROOM`, `MEMORY_STALL_PRESSURE`, `IO_STALL_PRESSURE`, `FILE_HANDLE_LIMIT_NEAR`, `INODE_NEAR_FULL` and `MD_RAID_DEGRADED`. All have `scope=current_snapshot`. An absent sensor is not evidence of a clean result; the fields are null or empty on unsupported hosts. Existing JSON fields are retained; version 2 remains additive.
