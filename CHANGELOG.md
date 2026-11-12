@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.1] - 2026-11-12
+
+### Improved
+- Collect currently failed units from both the system and the invoking user's systemd managers. Unavailable user managers are reported as unchecked, not healthy.
+- Group historical classified service messages into bounded five-second time windows and list identified units, including entries without identifiable units.
+- Clarify that multiple service log entries do not establish the same number of failed services; a signal termination may coincide with shutdown and a historical failure may have recovered.
+- Include current system/user failed-unit status and historical service-message windows in text, HTML and JSON reports.
+- Add tests based on real Manjaro observations of rclone-onedrive and proton-backup failures, and update README/schema documentation.
+
+### Compatibility
+- JSON schema remains version 2, with additive fields only.
+
 ## [0.3.0] - 2026-11-12
 
 ### Added
