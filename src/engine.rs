@@ -269,10 +269,19 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
                 if let Some((before, after, iface)) = nearby_matching_subjects(
                     events, EventKind::LinkDown, EventKind::WifiAssociated, 120
                 ) {
-                    items.push(format!(
-                        "Subsequent Wi-Fi association on {iface}: {} ({} seconds after link event); Internet access not verified",
-                        utc_timestamp(after), after.saturating_sub(before)
-                    ));
+                    if after == before {
+                        // Journal timestamps are retained at whole-second resolution.
+                        // An association in the same second cannot prove which came first.
+                        items.push(format!(
+                            "Wi-Fi association and link event on {iface} logged in the same second at {}; ordering unknown; Internet access not verified",
+                            utc_timestamp(after)
+                        ));
+                    } else {
+                        items.push(format!(
+                            "Subsequent Wi-Fi association on {iface}: {} ({} seconds after link event); Internet access not verified",
+                            utc_timestamp(after), after - before
+                        ));
+                    }
                 }
                 items
             },
@@ -350,12 +359,19 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             id: "WIFI_LOCAL_ROAM_OBSERVED",
             severity: Severity::Info,
             confidence: Confidence::Observed,
-            title: "Wi-Fi handoff followed by association".into(),
-            explanation: "The driver reported deauthentication by local choice followed by association on the same interface. This may be normal access-point roaming; it does not prove Internet connectivity.".into(),
-            evidence: vec![format!(
-                "{iface}: local-choice deauthentication at {} and association {} seconds later",
-                utc_timestamp(start), end.saturating_sub(start)
-            )],
+            title: "Wi-Fi local-choice handoff and nearby association observed".into(),
+            explanation: "The driver reported deauthentication by local choice and a nearby association on the same interface. Their order cannot be established if both were logged in the same second. This may be normal access-point roaming; it does not prove Internet connectivity.".into(),
+            evidence: vec![if end == start {
+                format!(
+                    "{iface}: local-choice deauthentication and association logged in the same second at {}; order not verified",
+                    utc_timestamp(start)
+                )
+            } else {
+                format!(
+                    "{iface}: local-choice deauthentication at {} and association {} seconds later",
+                    utc_timestamp(start), end - start
+                )
+            }],
             checks: vec!["Inspect NetworkManager roaming decisions and access-point logs only if disruptions are observed".into()],
         });
     }
@@ -662,7 +678,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
                 id: "USB_DISCONNECT_BURST",
                 severity: Severity::Warning,
                 confidence: Confidence::Observed,
-                title: "Multiple USB devices disconnected in one short interval".into(),
+                title: "Multiple USB topology paths detached in one short interval".into(),
                 explanation: "Several USB paths detached close together. A dock or hub being unplugged or powered down is possible; this does not prove a hardware fault or causation of later network events.".into(),
                 evidence,
                 checks: vec![
@@ -770,6 +786,26 @@ mod tests {
         ];
         assert!(nearby_matching_subjects(&events,
             EventKind::LinkDown, EventKind::WifiAssociated, 30).is_none());
+    }
+
+    #[test]
+    fn same_second_wifi_events_do_not_claim_order_or_recovery() {
+        // Real journal export retains seconds, not subsecond timing. Even if the
+        // source association precedes deauthentication, their timestamps tie.
+        let events = vec![
+            ev(100, EventKind::WifiAssociated, Some("wlan0")),
+            ev(100, EventKind::WifiRoamStart, Some("wlan0")),
+            ev(100, EventKind::LinkDown, Some("wlan0")),
+        ];
+        let report = analyze(Snapshot { events, ..Snapshot::default() },
+            3600, Focus::Network, false);
+        let roam = report.findings.iter().find(|f|
+            f.id == "WIFI_LOCAL_ROAM_OBSERVED").unwrap();
+        assert!(roam.evidence.iter().any(|line| line.contains("order not verified")));
+        assert!(!roam.evidence.iter().any(|line| line.contains("later")));
+        let link = report.findings.iter().find(|f| f.id == "LINK_DISCONNECTS").unwrap();
+        assert!(link.evidence.iter().any(|line| line.contains("ordering unknown")));
+        assert!(!link.evidence.iter().any(|line| line.contains("Subsequent")));
     }
 
     #[test]
