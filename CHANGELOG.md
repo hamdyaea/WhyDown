@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.5] - 2026-11-12
+
+### Fixed
+- Prefer statically linked musl binaries by default on both glibc and musl hosts so that older-glibc systems (Debian 12 / Raspberry Pi OS 64-bit) do not hit `GLIBC_2.39 not found`.
+- Run and validate each downloaded candidate before replacing an existing binary; use a staged atomic rename to preserve prior installs if execution fails.
+- Verify release musl binaries have no dynamic ELF interpreter at packaging time.
+
+### Tests and documentation
+- Offline installer tests cover default musl target, GNU override, successful installation, and rejected candidate rollback.
+- README and test matrix document the confirmed Raspberry Pi OS v0.3.4 ABI failure and the new v0.3.5 workaround. Raspberry Pi hardware testing of v0.3.5 is still pending.
+- Diagnostics and JSON schema version 2 unchanged.
+
 ## [0.3.4] - 2026-11-12
 
 ### Added

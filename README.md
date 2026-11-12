@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.3.4 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.3.5 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -36,10 +36,10 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 
 ### Recommended: guided installer (no Rust/Cargo required)
 
-On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo):
+On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.4/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.5/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -55,7 +55,24 @@ sh scripts/install.sh --dry-run       # inspect target, binary URL, destination
 sh scripts/install.sh                 # verify SHA-256 and install under ~/.local/bin
 ```
 
-The installer selects Linux x86_64 or ARM64 and detects GNU libc or musl. It downloads the matching release archive and SHA-256 checksum and verifies the archive **before extraction**. It requires no Rust/Cargo, root access, or modification to system services. It does download files from GitHub; WhyDown itself remains offline. Checksums show download integrity, **not a cryptographic publisher signature**. Use `--libc gnu|musl` to override detection, `--prefix /absolute/path` to choose the destination, and `--help` for all options.
+**Compatibility fix (v0.3.5):** the installer now selects a **statically linked musl binary by default**, even on glibc-based Debian, Ubuntu and Raspberry Pi OS. The v0.3.4 GNU/ARM64 binary was built on Ubuntu 24.04 and required `GLIBC_2.39`, which Debian 12 / Raspberry Pi OS cannot provide (glibc 2.36). Passing SHA-256 verification demonstrates download integrity, **not runtime compatibility**.
+
+The installer downloads and checks the archive, then runs `--version` **before replacing an existing WhyDown executable**. If that fails, the existing installation is preserved. It stages an executable on the same filesystem and atomically renames it after verification. No Rust/Cargo, root privileges or service changes are needed. The installer downloads from GitHub; WhyDown's diagnostics remain offline. Checksums do **not** constitute publisher signatures. Use `--libc gnu` only when the glibc requirements of that release are satisfied, `--libc musl` to force static musl, and `--prefix /absolute/path` to change the installation directory.
+
+### Raspberry Pi OS / Debian 12: GLIBC_2.39 not found
+
+The v0.3.4 GNU/ARM64 release was linked against glibc 2.39, which is newer than Debian 12's glibc 2.36. **Do not upgrade the Raspberry Pi's system glibc solely to run WhyDown.**
+
+```bash
+cd ~/WhyDown
+git pull --ff-only
+sh scripts/install.sh --print-target   # expected: aarch64-unknown-linux-musl
+sh scripts/install.sh --dry-run
+sh scripts/install.sh                  # verifies execution before replacement
+~/.local/bin/whydown --version
+```
+
+This can replace a previously installed incompatible GNU build with the static-musl build. If Rust/Cargo is available, `sh scripts/install.sh --from-source` is an alternative. Manually downloaded `aarch64-unknown-linux-musl` assets are another option. Static builds still require a compatible CPU and Linux kernel.
 
 ### Manual download of prebuilt Linux binary (no Rust required)
 
@@ -69,7 +86,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.3.4
+VERSION=v0.3.5
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -149,7 +166,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.3.4
+./target/release/whydown --version   # expects whydown 0.3.5
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -217,7 +234,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.3.4 [DEMO]
+WhyDown 0.3.5 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -277,14 +294,14 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64) compiled v0.3.3 and successfully diagnosed system/user services. The v0.3.4 installer and the remaining Linux distributions still require manual platform testing.** See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64) compiled v0.3.3 and diagnosed system/user services successfully. The v0.3.4 GNU download passed SHA-256 verification but failed to start because it needed GLIBC_2.39. The new v0.3.5 static-musl installer still needs a live Raspberry Pi test.** See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.3.4 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.3.5 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Security and privacy
 
@@ -337,10 +354,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.3.2 (released):** filter privilege-wrapper command audit false positives; show approximate previous/current boot relation on historical service windows.
 - **v0.3.3 (released):** correct singular/plural labels in diagnostics and reports without changing detection logic or JSON schema.
 - **v0.3.4 (released):** guided Linux x86_64/ARM64 installer with automatic ABI detection, SHA-256 verification, and optional source build/preflight help; Raspberry Pi OS guidance.
+- **v0.3.5 (released):** static musl by default, candidate compatibility checks before installing, and preservation of previous executables when installation fails.
 - **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.3.4: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.3.5: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
