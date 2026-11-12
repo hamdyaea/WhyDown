@@ -90,7 +90,13 @@ pub fn run_with_io<R: BufRead, W: Write>(
                 notice = format!(
                     "Diagnostic completed: {warnings} warning(s), {} finding(s), {} journal entries{}. Choose 6 to view evidence, 7 for events, or 8 for coverage.",
                     report.findings.len(), report.snapshot.journal_entries_examined,
-                    if report.snapshot.journal_truncated { " [PARTIAL: try option 5]" } else { "" }
+                    if report.snapshot.journal_truncated {
+                        if cli.max_events < 10_000 {
+                            " [PARTIAL: option 5 increases the journal cap]"
+                        } else {
+                            " [PARTIAL: narrow lookback with option 3]"
+                        }
+                    } else { "" }
                 );
                 // No extra pause: the next number is a dashboard action.
             }
