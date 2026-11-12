@@ -128,3 +128,12 @@ Run `whydown diagnose --focus system --current-boot --since 24h` and `whydown di
 On Manjaro x86_64, the first v0.5.0 run took noticeably longer than expected and reported `Filesystem usage unavailable`; a subsequent v0.5.0 JSON report successfully listed disks, including `/mnt/onedrive`. The v0.5.1 run took about two seconds and collected local disk/inode data. **The source of the original delay is unconfirmed** because timings were not captured.
 
 Automated tests now cover `df -PT/-Pi --local` with known network-backed FUSE exclusions, explicit `--include-remote-mounts` opt-in, resilient partial `df` parsing, and safe collector timing recording/serialization. Manually compare v0.5.2 default and `--include-remote-mounts` on Manjaro, capturing `collector_timings`, and confirm that normal local disk usage is still reported. Do not deliberately stall remote mounts on production systems.
+
+
+## Manjaro x86_64: v0.5.2 live diagnostics (2026-11-12)
+
+Installer verified `whydown 0.5.2`. A complete `--focus all --current-boot --since 24h --max-events 5000 --progress` run finished in about **2 seconds**; the per-collector timings were systemd system/user 25/25 ms, pacman 1606 ms, dpkg 25 ms, `df` disk 50 ms, `df` inode 50 ms and journalctl 202 ms. A separate `--focus system --format json` run recorded pacman 1354 ms, dpkg 25 ms, both `df` calls 50 ms and journalctl 226 ms. No filesystem collection failure occurred and the known network-backed FUSE mount was explicitly excluded.
+
+Two historical journal warnings were recorded: a kernel network link disconnect and a lightdm.service failure message. At the current snapshot `wlan0` was up, IPv4/IPv6 default routes were present and the system/user failed-unit counts were both zero. These warnings do not verify ongoing incidents. The previously long v0.5.0 run was not timed per collector, so its exact cause remains unknown.
+
+The v0.5.2 log also shows a progress line abutting the start of the report (`elapsed 1sWhyDown 0.5.2`). v0.5.3 adds an explicit progress-renderer pause/join before output and a clean final line after successful completion. Automated ordering checks are included, but manual validation in an interactive terminal is still pending.

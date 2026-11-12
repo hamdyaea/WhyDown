@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.5.2 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.5.3 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -18,6 +18,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
 - **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
 - **Service diagnostics (v0.3.1):** separate system/user systemd failed-unit snapshots, plus historical service-message windows that distinguish log entries from independent failures.
+- **Clean progress/report boundaries (v0.5.3):** stops the live progress renderer before writing stdout or announcing a saved file, then emits the final 100% line only on success. Prevents merged terminal text such as `elapsed 1sWhyDown 0.5.2`; interrupted writes are not marked successful.
 - **Fast and inspectable filesystem collection (v0.5.2):** ignore network mounts and known network-backed FUSE types during default disk/inode checks, including rclone/OneDrive. Use `--include-remote-mounts` to explicitly include them (can stall); keep valid partial `df` output and record actual elapsed time for each subprocess in the report.
 - **Live diagnostic progress (v0.5.1):** an animated visual progress bar on interactive terminals, stage count, current collector name and elapsed time; default auto/TTY detection, `--progress` force and `--no-progress` suppression. Always uses standard error, never stdout or report JSON.
 - **Portable Linux host health (v0.5.0):** read-only memory headroom from `/proc/meminfo`, sustained 60-second pressure from `/proc/pressure/`, kernel file-handle capacity, inode utilization via `df -Pi`, and Linux MD RAID active-member counts. Only strong evidence produces warnings; optional sensors remain unknown when unavailable.
@@ -47,7 +48,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.5.2/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.5.3/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -109,7 +110,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.5.2
+VERSION=v0.5.3
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -189,7 +190,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.5.2
+./target/release/whydown --version   # expects whydown 0.5.3
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -269,7 +270,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.5.2 [DEMO]
+WhyDown 0.5.3 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -343,7 +344,7 @@ When diagnostics take time, WhyDown displays a **progress bar on stderr** in an 
 [########------------]  40% (2/5) Checking storage and resource health | pacman -Dk (max 20s) | elapsed 6s
 ```
 
-Use `--progress` to force visual progress even when stderr is redirected (newline-based logging without ANSI control codes), or `--no-progress` to keep automation completely quiet. Default is automatic, enabled only when **stderr is an interactive TTY**. Progress is never written to stdout, so `--format json`, piping to `jq`, or writing `--output report.json` remains valid. Progress stops when the report has been written and an interrupted command never incorrectly displays 100% successful completion.
+Use `--progress` to force visual progress even when stderr is redirected (newline-based logging without ANSI control codes), or `--no-progress` to keep automation completely quiet. Default is automatic, enabled only when **stderr is an interactive TTY**. Progress is never written to stdout, so `--format json`, piping to `jq`, or writing `--output report.json` remains valid. Progress rendering is paused and its terminal line cleared **before** the report is displayed or its filename is announced; the final completion line appears **after** successful output. An interrupted command never incorrectly displays 100% completion.
 
 ```bash
 whydown diagnose --focus all --current-boot --max-events 5000
@@ -417,7 +418,7 @@ whydown diagnose --since 24h --max-events 5000 --format json --output report.jso
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.5.2 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.5.3 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -495,10 +496,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.5.0 (released):** extend read-only host diagnostics to MemAvailable, 60-second memory/I/O PSI, kernel file-handle limits, inode exhaustion and Linux MD RAID degradation; include test fixtures, privacy-safe metrics and schema-v2 exports.
 - **v0.5.1 (released):** interactive progress bar with animated heartbeat, completed-stage percentage, current command and elapsed time; separate stderr output and opt-in/out flags, with tests and no JSON schema changes.
 - **v0.5.2 (released):** default local-only disk and inode collection excluding common remote/FUSE backends, optional remote scan, partial df results preserved, precise per-collector timing telemetry in all report formats (local-only; no network transmission).
+- **v0.5.3 (released):** prevent progress/JSON or progress/text collisions and duplicate completion lines, keeping the final 100% status conditional on successfully written output; validate Manjaro v0.5.2 field timings.
 - **v0.5 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.5.2: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.5.3: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 

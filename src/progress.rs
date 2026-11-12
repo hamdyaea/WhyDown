@@ -27,11 +27,13 @@ struct Status {
     stage_start: Instant,
     finished: bool,
     succeeded: bool,
+    paused_for_output: bool,
 }
 
 pub struct Progress {
     state: Option<Arc<Mutex<Status>>>,
     worker: Option<JoinHandle<()>>,
+    terminal: bool,
 }
 
 impl Progress {
@@ -39,7 +41,7 @@ impl Progress {
         let terminal = io::stderr().is_terminal();
         if stages == 0 || mode == ProgressMode::Never
             || (mode == ProgressMode::Auto && !terminal) {
-            return Self { state: None, worker: None };
+            return Self { state: None, worker: None, terminal };
         }
 
         let started = Instant::now();
@@ -48,7 +50,7 @@ impl Progress {
             stage: "Preparing diagnostic".into(),
             detail: String::new(),
             start: started, stage_start: started,
-            finished: false, succeeded: false,
+            finished: false, succeeded: false, paused_for_output: false,
         }));
         let reader = Arc::clone(&shared);
         let worker = thread::spawn(move || {
@@ -59,6 +61,16 @@ impl Progress {
                     Ok(guard) => guard.clone(),
                     Err(_) => break,
                 };
+                // Stop repainting and clear the terminal line before the
+                // parent writes the report or a saved-file notification.
+                if snapshot.paused_for_output {
+                    if terminal {
+                        let mut err = io::stderr().lock();
+                        let _ = write!(err, "\r\x1b[2K");
+                        let _ = err.flush();
+                    }
+                    break;
+                }
                 let line = format_status(&snapshot);
                 // Terminal: animate a stable single line. Forced output to a
                 // file/pipe: avoid ANSI and carriage returns; print on stage
@@ -83,7 +95,7 @@ impl Progress {
                 thread::sleep(Duration::from_millis(160));
             }
         });
-        Self { state: Some(shared), worker: Some(worker) }
+        Self { state: Some(shared), worker: Some(worker), terminal }
     }
 
     pub fn begin(&self, stage: &str) {
@@ -106,6 +118,15 @@ impl Progress {
         });
     }
 
+    /// Join the live renderer before writing stdout or a saved-file notice.
+    /// Keep the progress below 100% until the output operation succeeds.
+    pub fn prepare_for_output(&mut self) {
+        if self.worker.is_some() {
+            self.modify(|s| s.paused_for_output = true);
+            self.join();
+        }
+    }
+
     pub fn finish(&mut self) {
         self.modify(|s| {
             s.completed = s.total;
@@ -114,7 +135,21 @@ impl Progress {
             s.finished = true;
             s.succeeded = true;
         });
-        self.join();
+        if self.worker.is_some() { self.join(); }
+        else { self.print_completion(); }
+    }
+
+    fn print_completion(&self) {
+        let Some(state) = &self.state else { return };
+        let Ok(status) = state.lock() else { return };
+        let line = format_status(&status);
+        let mut err = io::stderr().lock();
+        if self.terminal {
+            let _ = writeln!(err, "\r\x1b[2K{line}");
+        } else {
+            let _ = writeln!(err, "{line}");
+        }
+        let _ = err.flush();
     }
 
     fn modify(&self, change: impl FnOnce(&mut Status)) {
@@ -134,16 +169,20 @@ impl Progress {
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        // Early exits must not fake 100% success.
+        // Early exits must not fake 100% success. A successful finish already
+        // printed its final status; never print a duplicate on drop.
+        let mut interrupted = false;
         self.modify(|s| {
             if !s.finished {
                 s.stage = "Diagnostic interrupted".into();
                 s.detail.clear();
                 s.finished = true;
                 s.succeeded = false;
+                interrupted = true;
             }
         });
-        self.join();
+        if self.worker.is_some() { self.join(); }
+        else if interrupted { self.print_completion(); }
     }
 }
 
@@ -172,7 +211,7 @@ mod tests {
         let mut status = Status {
             completed: 0, total: 4, stage: "Pacman database".into(),
             detail: "pacman -Dk".into(), start: now, stage_start: now,
-            finished: false, succeeded: false,
+            finished: false, succeeded: false, paused_for_output: false,
         };
         let line = format_status(&status);
         assert!(line.contains("[--------------------]   0% (0/4)"));
@@ -184,6 +223,22 @@ mod tests {
     }
 
     #[test]
+    fn forced_progress_pauses_before_report_without_marking_success() {
+        let mut p = Progress::new(ProgressMode::Always, 3);
+        p.begin("Collecting");
+        p.complete_step();
+        p.prepare_for_output();
+        let paused = p.state.as_ref().unwrap().lock().unwrap().clone();
+        assert_eq!(paused.completed, 1);
+        assert!(!paused.finished);
+        assert!(paused.paused_for_output);
+        p.finish();
+        let finished = p.state.as_ref().unwrap().lock().unwrap().clone();
+        assert!(finished.finished && finished.succeeded);
+        assert_eq!(finished.completed, 3);
+    }
+
+    #[test]
     fn disabled_and_finished_paths_are_safe() {
         let p = Progress::new(ProgressMode::Never, 3);
         p.begin("test");
@@ -191,6 +246,7 @@ mod tests {
         p.complete_step();
         drop(p);
         let mut p = Progress::new(ProgressMode::Never, 1);
+        p.prepare_for_output();
         p.finish();
     }
 }

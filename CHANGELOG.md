@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.5.3] - 2026-11-12
+
+### Fixed
+- Serialize terminal presentation correctly: pause and join the live progress redraw thread before writing a text/JSON/HTML report to stdout or printing a saved-report notification. Clear the transient terminal progress line so it never collides with `WhyDown 0.5.2` at report start.
+- Emit the final 100% completion message only after successful report output. On an output error, retain an interrupted progress status; do not duplicate completion output when the progress object is dropped.
+- Add unit and CLI integration regressions for pause/resume-to-completion, duplicate progress lines, saved-file notifications and clean JSON stdout.
+
+### Field validation recorded
+- Manjaro x86_64 v0.5.2: full `--focus all --current-boot --max-events 5000` run reported completion in about 2 seconds, with `pacman -Dk` 1606 ms, dpkg 25 ms, `df` 50 ms for each disk/inode query, and journalctl 202 ms. A second system-focused run reported pacman 1354 ms and journalctl 226 ms. Both pacman and dpkg checks passed. This confirms a fast recent local run, **not the exact cause of the earlier v0.5.0 delay**.
+- Historical observations: one kernel link disconnect and one lightdm service-failure message in the window, with wlan0 up and zero currently failed system/user systemd units. Neither warning proves an active fault or a root cause.
+- v0.5.3 progress ordering remains to be manually verified in the user's interactive Manjaro terminal after publication.
+
 ## [0.5.2] - 2026-11-12
 
 ### Fixed

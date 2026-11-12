@@ -110,8 +110,30 @@ fn forced_progress_uses_stderr_without_corrupting_json_stdout() {
     assert!(report.contains("\"schema_version\": 2"));
     assert!(!report.contains("Diagnostic complete"));
     assert!(stderr.contains("100% (3/3) Diagnostic complete"));
+    assert_eq!(stderr.matches("100% (3/3) Diagnostic complete").count(), 1,
+        "successful progress must not be printed twice on drop");
     assert!(stderr.contains("[####################]"));
     assert!(!stderr.contains("\u{1b}"), "non-TTY forced progress should not contain ANSI");
+}
+
+#[test]
+fn saved_report_progress_lines_do_not_overlap_notifications() {
+    let path = std::env::temp_dir().join(format!(
+        "whydown-test-{}-progress.json", std::process::id()
+    ));
+    let run = whydown(&["demo", "--format", "json", "--progress",
+        "--output", path.to_str().unwrap(), "--overwrite"]);
+    assert!(run.status.success());
+    assert!(run.stdout.is_empty(), "saved JSON should not appear on stdout");
+    let err = String::from_utf8(run.stderr).unwrap();
+    assert!(err.contains("Report saved to "));
+    assert!(err.contains("100% (3/3) Diagnostic complete"));
+    assert_eq!(err.matches("100% (3/3) Diagnostic complete").count(), 1);
+    assert!(!err.contains("Report saved to ["),
+        "progress must not collide with saved-file notification");
+    let data = fs::read_to_string(&path).unwrap();
+    assert!(data.starts_with('{') && data.contains("\"schema_version\": 2"));
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
