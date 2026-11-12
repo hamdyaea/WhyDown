@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 300" role="img" aria-label="WhyDown — Linux diagnostics">
+  <defs>
+    <linearGradient id="panel" x1="0" x2="1"><stop stop-color="#10283e"/><stop offset="1" stop-color="#071425"/></linearGradient>
+    <linearGradient id="teal" x1="0" x2="1"><stop stop-color="#06ddd0"/><stop offset="1" stop-color="#099b9c"/></linearGradient>
+  </defs>
+  <rect width="1060" height="300" rx="27" fill="url(#panel)"/>
+  <g transform="translate(37,32)">
+    <path fill="#087268" d="M0 19h53l21 98 40-93h41l40 94 22-99h51l-45 206h-57l-33-82-39 82H42Z"/>
+    <path fill="#072b45" d="M176 19h67c61 0 93 40 93 103 0 66-33 103-95 103h-65l26-103Zm60 43-17 121h20c34 0 48-22 48-61 0-40-15-60-51-60Z"/>
+    <path d="m45 88 70 61 73-12 68 61h20" fill="none" stroke="url(#teal)" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+    <g fill="#ebffff" stroke="#04d8cf" stroke-width="9"><circle cx="45" cy="88" r="14"/><circle cx="115" cy="149" r="14"/><circle cx="276" cy="198" r="14"/></g>
+    <g fill="#b7e5e5"><rect x="236" y="77" width="64" height="11" rx="5"/><rect x="236" y="99" width="51" height="11" rx="5"/><rect x="236" y="121" width="33" height="11" rx="5"/></g>
+  </g>
+  <text x="391" y="194" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-weight="800" font-size="117" letter-spacing="-6" fill="#f5f8ff">Why</text>
+  <text x="640" y="194" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-weight="800" font-size="117" letter-spacing="-6" fill="#09b4ad">Down</text>
+</svg>
