@@ -1,6 +1,6 @@
 //! Text, JSON and HTML outputs. No runtime third-party dependencies.
 
-use crate::model::{Finding, Focus, Report, Severity};
+use crate::model::{count_word, Finding, Focus, Report, Severity};
 use crate::time::utc_timestamp;
 use std::fmt::Write as _;
 
@@ -13,7 +13,8 @@ pub fn text(report: &Report) -> String {
     writeln!(out, "System    : {}", report.snapshot.os).unwrap();
     writeln!(out, "Kernel    : {}", report.snapshot.kernel).unwrap();
     writeln!(out, "Focus     : {}", report.focus).unwrap();
-    writeln!(out, "Journal    : last {} minute(s), newest entries only", report.lookback_seconds / 60).unwrap();
+    writeln!(out, "Journal    : last {} {}, newest entries only",
+        report.lookback_seconds / 60, count_word((report.lookback_seconds / 60) as usize, "minute", "minutes")).unwrap();
     writeln!(out, "Findings  : {}", report.findings.len()).unwrap();
     writeln!(out).unwrap();
 
@@ -53,12 +54,14 @@ pub fn text(report: &Report) -> String {
     if report.focus.includes(Focus::Services) {
         writeln!(out, "CURRENT SYSTEMD FAILED UNIT SNAPSHOT").unwrap();
         if report.snapshot.system_units_checked {
-            writeln!(out, "  System manager: {} failed unit(s)", report.snapshot.failed_units.len()).unwrap();
+            writeln!(out, "  System manager: {} failed {}", report.snapshot.failed_units.len(),
+                count_word(report.snapshot.failed_units.len(), "unit", "units")).unwrap();
         } else {
             writeln!(out, "  System manager: not checked").unwrap();
         }
         if let Some(failed) = &report.snapshot.failed_user_units {
-            writeln!(out, "  User manager: {} failed unit(s) (invoking user)", failed.len()).unwrap();
+            writeln!(out, "  User manager: {} failed {} (invoking user)", failed.len(),
+                count_word(failed.len(), "unit", "units")).unwrap();
         } else {
             writeln!(out, "  User manager: not checked").unwrap();
         }
@@ -68,9 +71,9 @@ pub fn text(report: &Report) -> String {
     if !report.service_event_windows.is_empty() {
         writeln!(out, "HISTORICAL SERVICE MESSAGE WINDOWS (not independent failed-service counts)").unwrap();
         for (i, group) in report.service_event_windows.iter().enumerate() {
-            writeln!(out, "  {}. {} – {} | {} classified entries; {} unattributed; unit(s): {}; boot: {}",
+            writeln!(out, "  {}. {} – {} | {} classified {}; {} unattributed; unit(s): {}; boot: {}",
                 i + 1, utc_timestamp(group.start), utc_timestamp(group.end),
-                group.entry_count, group.unattributed_entries,
+                group.entry_count, count_word(group.entry_count, "entry", "entries"), group.unattributed_entries,
                 if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") },
                 boot_relation(report, group.start, group.end)).unwrap();
         }
@@ -78,11 +81,12 @@ pub fn text(report: &Report) -> String {
     }
 
     if !report.network_incidents.is_empty() {
-        writeln!(out, "NETWORK INCIDENT WINDOWS ({} time clusters; historical observations, current connectivity not verified)", report.network_incidents.len()).unwrap();
+        writeln!(out, "NETWORK INCIDENT WINDOWS ({} time {}; historical observations, current connectivity not verified)",
+            report.network_incidents.len(), count_word(report.network_incidents.len(), "cluster", "clusters")).unwrap();
         for (i, group) in report.network_incidents.iter().enumerate() {
-            writeln!(out, "  {}. {} – {} | {} event(s): {}", i + 1,
+            writeln!(out, "  {}. {} – {} | {} {}: {}", i + 1,
                 utc_timestamp(group.start), utc_timestamp(group.end),
-                group.event_count(),
+                group.event_count(), count_word(group.event_count(), "event", "events"),
                 match group.subject.as_deref() {
                     Some(name) => format!("{} [{}]", group.summary(), name),
                     None => format!("{} [interface unknown]", group.summary()),
@@ -92,7 +96,8 @@ pub fn text(report: &Report) -> String {
     }
 
     if !report.timeline.is_empty() {
-        writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} events)", report.timeline.len()).unwrap();
+        writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} {})",
+            report.timeline.len(), count_word(report.timeline.len(), "event", "events")).unwrap();
         for event in &report.timeline {
             writeln!(out, "  {}  {}{}{}",
                 utc_timestamp(event.timestamp), event.kind.label(),
@@ -382,9 +387,9 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
     if !report.service_event_windows.is_empty() {
         out.push_str("<h2>Historical service message windows</h2><p class=\"muted\">Time clusters, not independent failed services or proof of a current outage.</p>");
         for group in &report.service_event_windows {
-            write!(out, "<article class=\"card\"><h3>{} – {}</h3><p>{} classified entries; {} without unit attribution.</p><p>Unit(s): {}</p><p>Boot relation (approximate): {}</p></article>",
+            write!(out, "<article class=\"card\"><h3>{} – {}</h3><p>{} classified {}; {} without unit attribution.</p><p>Unit(s): {}</p><p>Boot relation (approximate): {}</p></article>",
                 utc_timestamp(group.start), utc_timestamp(group.end),
-                group.entry_count, group.unattributed_entries,
+                group.entry_count, count_word(group.entry_count, "entry", "entries"), group.unattributed_entries,
                 html_escape(&if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") }),
                 boot_relation(report, group.start, group.end)).unwrap();
         }
@@ -392,10 +397,11 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
     if !report.network_incidents.is_empty() {
         out.push_str("<h2>Network incident windows</h2><p class=\"muted\">Historical time clusters, not proven outages. Current connectivity has not been verified.</p>");
         for incident in &report.network_incidents {
-            write!(out, "<article class=\"card\"><h3>{}</h3><p>Interface: {}</p><p><time>{} – {}</time></p><p>{} classified event(s)</p></article>",
+            write!(out, "<article class=\"card\"><h3>{}</h3><p>Interface: {}</p><p><time>{} – {}</time></p><p>{} classified {}</p></article>",
                 html_escape(&incident.summary()),
                 html_escape(incident.subject.as_deref().unwrap_or("not identified")),
-                utc_timestamp(incident.start), utc_timestamp(incident.end), incident.event_count()).unwrap();
+                utc_timestamp(incident.start), utc_timestamp(incident.end),
+                incident.event_count(), count_word(incident.event_count(), "event", "events")).unwrap();
         }
     }
     if !report.timeline.is_empty() {
@@ -440,6 +446,28 @@ mod tests {
         let page = html(&report);
         assert!(page.contains("<!doctype html>"));
         assert!(page.contains("DEMO DATA"));
+    }
+
+    #[test]
+    fn singular_service_event_and_timeline_labels() {
+        use crate::model::{Event, EventKind, Snapshot};
+        let snapshot = Snapshot {
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            events: vec![
+                Event { timestamp: 1, kind: EventKind::ServiceFailure,
+                    subject: Some("example.service".into()), source: Some("systemd".into()) }
+            ],
+            ..Snapshot::default()
+        };
+        let report = engine::analyze(snapshot, 60, Focus::Services, false);
+        let plain = text(&report);
+        assert!(plain.contains("1 classified entry; 0 unattributed"));
+        assert!(plain.contains("CLASSIFIED EVENT TIMELINE (last 1 event)"));
+        assert!(plain.contains("System manager: 0 failed units"));
+        assert!(!plain.contains("1 events"));
+        let html_page = html(&report);
+        assert!(html_page.contains("1 classified entry; 0 without unit attribution."));
     }
 
     #[test]

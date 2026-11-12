@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.3] - 2026-11-12
+
+### Improved
+
+- Correct count-dependent English wording in text and HTML diagnostics (e.g. "1 classified entry", "1 time window", "last 1 event", "0 failed units").
+- Preserve classification rules, service time windows, severity and diagnostics unchanged.
+- Add regression tests covering singular and plural report labels and historical pre-boot findings.
+
+### Compatibility
+
+- JSON schema remains version 2, with no new fields.
+
 ## [0.3.2] - 2026-11-12
 
 ### Fixed

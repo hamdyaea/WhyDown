@@ -1,10 +1,10 @@
 # Cross-distribution validation matrix
 
-**Status: test plan, not a claim of completed manual validation.** CI builds on Ubuntu and checks synthetic journal fixtures. The Manjaro network, disk and service behavior was manually investigated through v0.3.0; a v0.3.2 retest and other environments are pending.
+**Status: test plan, not a claim of completed manual validation.** CI builds on Ubuntu and checks synthetic journal fixtures. The Manjaro network, disk and service behavior was manually investigated through v0.3.0; a v0.3.3 retest and other environments are pending.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | Tested through v0.3.1; retest v0.3.2 | NetworkManager, XFS /var, pacman cache, reboots |
+| Manjaro | x86_64 | Tested through v0.3.2; retest v0.3.3 | NetworkManager, XFS /var, pacman cache, reboots |
 | Raspberry Pi OS 64-bit | aarch64 | Planned | systemd, headless ARM, low-power disk I/O |
 | Debian VM | x86_64 | Planned | systemd, DHCP, small VM disk |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
