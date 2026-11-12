@@ -220,7 +220,9 @@ pub fn collect_with_options(
     progress.begin("Reading journal entries");
     progress.detail("journalctl (max 45s)");
     let since_arg = format!("--since=@{since_unix}");
-    let count_arg = format!("--lines={max_events}");
+    // Request one extra entry as a sentinel so we can distinguish an exact
+    // N-entry result from a genuinely truncated history. Only N are analyzed.
+    let count_arg = format!("--lines={}", max_events.saturating_add(1));
     let mut journal_args = vec!["--no-pager", "--output=short-unix"];
     if current_boot { journal_args.push("--boot=0"); }
     journal_args.push(since_arg.as_str());
@@ -228,17 +230,19 @@ pub fn collect_with_options(
     match capture_timed(&mut snapshot, "journalctl", "journalctl", &journal_args) {
         Ok((true, output)) => {
             snapshot.journal_checked = true;
-            let lines: Vec<&str> = output.lines().collect();
-            // With --lines N, a long journal may contain earlier entries not read here.
-            if lines.len() >= max_events {
+            let (sample, truncated, examined) =
+                limit_journal_sample(&output, max_events);
+            snapshot.journal_truncated = truncated;
+            snapshot.journal_entries_examined = examined;
+            if truncated {
                 snapshot.notes.push(format!(
-                    "Only the newest {max_events} journal entries were examined; earlier entries in the requested period may be missing"
+                    "Journal window incomplete: only the newest {max_events} entries were analyzed; older entries in the requested period were excluded. Increase --max-events (up to 10000) or narrow --since"
                 ));
             }
-            if lines.is_empty() || output.contains("-- No entries --") {
+            if examined == 0 {
                 snapshot.notes.push("No journal entries were returned; logging may be unavailable, inaccessible or simply quiet".into());
             }
-            snapshot.events = parse_journal(&output);
+            snapshot.events = parse_journal(&sample);
         }
         Ok((false, _)) => snapshot.notes.push(
             "Journal collection failed or access is restricted; verify journalctl permissions and available boots".into(),
@@ -250,6 +254,24 @@ pub fn collect_with_options(
 
     progress.complete_step();
     snapshot
+}
+
+/// Keep only the newest N journal lines. journalctl was asked for N+1,
+/// providing an exact sentinel when the requested journal window is larger.
+fn limit_journal_sample(content: &str, max_events: usize) -> (String, bool, usize) {
+    let lines: Vec<&str> = content.lines().collect();
+    let truncated = max_events > 0 && lines.len() > max_events;
+    let kept = if truncated {
+        &lines[lines.len() - max_events..]
+    } else {
+        lines.as_slice()
+    };
+    let examined = if kept.len() == 1 && kept[0].contains("-- No entries --") {
+        0
+    } else {
+        kept.len()
+    };
+    (kept.join("\n"), truncated, examined)
 }
 
 fn read_trimmed(path: &str) -> Option<String> {
@@ -743,6 +765,31 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journal_sampling_uses_extra_entry_to_detect_actual_truncation() {
+        let logs = concat!(
+            "1700000000.1 host systemd[1]: example.service: Failed with result 'exit-code'.\n",
+            "1700000001.1 host kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff\n",
+            "1700000002.1 host app[1]: recovered normally\n",
+        );
+        let (limited, truncated, count) = limit_journal_sample(logs, 2);
+        assert!(truncated);
+        assert_eq!(count, 2);
+        assert!(!limited.contains("example.service"));
+        assert!(limited.contains("wlan0:"));
+        assert!(limited.contains("recovered normally"));
+
+        let (exact, truncated, count) = limit_journal_sample(logs, 3);
+        assert!(!truncated, "exactly N entries must not be called truncated");
+        assert_eq!(count, 3);
+        assert_eq!(exact.lines().count(), 3);
+
+        let (none, truncated, count) = limit_journal_sample("-- No entries --\n", 5);
+        assert!(!truncated);
+        assert_eq!(count, 0);
+        assert_eq!(none, "-- No entries --");
+    }
 
     #[test]
     fn local_df_default_skips_remote_mounts_but_full_scan_is_opt_in() {
