@@ -97,3 +97,10 @@ The corresponding new warning IDs are `LOW_MEMORY_HEADROOM`, `MEMORY_STALL_PRESS
 ## v0.5.1 progress output (no schema change)
 
 Live diagnostic progress is a **terminal user-interface feature**, not a report field. The bar goes exclusively to stderr, has TTY detection by default, and shows the percentage of **completed phases**, active collector name and elapsed time. `--progress` forces it; `--no-progress` silences it. JSON schema_version is still 2 and all report data remains on stdout or the `--output` file.
+
+
+## WhyDown v0.5.2: measured collector timings (schema remains 2)
+
+Top-level `collector_timings` is an array of `{name, elapsed_ms, succeeded}` entries. A `name` is a fixed safe label (for example `df disk usage`, `pacman -Dk` or `journalctl`), `elapsed_ms` is the observed wall-clock duration and `succeeded` reflects the command exit status. No raw stdout/stderr, command-line paths, credentials, or network responses are retained.
+
+By default disk and inode checks use local-only `df` with common network-backed FUSE types excluded. `--include-remote-mounts` enables previous all-mount behavior. Valid partial `df` output is kept when `df` exits unsuccessfully; a collection note explicitly marks partial results. Filesystem coverage must be understood in light of these exclusions and notes.
