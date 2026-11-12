@@ -1,11 +1,11 @@
 # Cross-distribution validation matrix
 
-**Status: test plan, not a claim of completed manual validation.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. Raspberry Pi OS ARM64 successfully built and diagnosed services with v0.3.3; the v0.3.4 GNU binary failed with GLIBC_2.39 not found on Debian 12. Retest with the v0.3.5 default static musl installer.
+**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
 | Manjaro | x86_64 | Tested through v0.3.3; retest v0.3.5 installer | NetworkManager, XFS /var, pacman cache, reboots |
-| Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3 source build passed; v0.3.4 GNU download failed at runtime; v0.3.5 musl retest pending | systemd, headless ARM, low-power disk I/O |
+| Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
 | Debian VM | x86_64 | Planned | systemd, DHCP, small VM disk |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
 | Ubuntu Server | x86_64 or aarch64 | Planned | headless services, journal permissions |
@@ -38,9 +38,20 @@ In v0.3.2, verify that a `sudo journalctl --grep='Failed to start'` audit comman
 
 ## v0.3.4 guided installer checks
 
-Run `sh scripts/install.sh --print-target` and `--dry-run` to check architecture selection without downloading. Run `--check-build-prereqs` to verify source-build tools. The default installer downloads to `~/.local/bin` without Rust/Cargo or root privileges. After installation verify `~/.local/bin/whydown --version`. This feature must be validated manually on the Raspberry Pi before it is marked as hardware-tested.
+Run `sh scripts/install.sh --print-target` and `--dry-run` to check architecture selection without downloading. Run `--check-build-prereqs` to verify source-build tools. The default installer downloads to `~/.local/bin` without Rust/Cargo or root privileges. After installation verify `~/.local/bin/whydown --version`. The v0.3.5 default static-musl installer **was validated manually on Raspberry Pi OS ARM64 on 2026-11-12**. Other host types and installer modes still require manual tests.
 
 
 ## Debian 12 glibc ABI incident (2026-11-12)
 
-The WhyDown v0.3.4 ARM64 GNU archive downloaded and passed its checksum on Raspberry Pi OS, but could not run because it required glibc 2.39 (Debian 12 provides 2.36). This is a **failed binary compatibility test**, not an installation of Rust failure. The v0.3.5 installer prefers statically linked musl and preflights executables before replacing earlier installs. CI verifies static musl releases and simulates failing candidates. Real Raspberry Pi OS v0.3.5 testing remains pending.
+The WhyDown v0.3.4 ARM64 GNU archive downloaded and passed its checksum on Raspberry Pi OS, but could not run because it required glibc 2.39 (Debian 12 provides 2.36). This is a **failed binary compatibility test**, not an installation of Rust failure. The v0.3.5 installer prefers statically linked musl and preflights executables before replacing earlier installs. CI verifies static musl releases and simulates failing candidates. The v0.3.5 test on Raspberry Pi OS hardware **succeeded**: target `aarch64-unknown-linux-musl`, archive and checksum, executable installation and service diagnosis.
+
+
+## Hardware validation record — Raspberry Pi OS ARM64 (2026-11-12)
+
+- OS: Debian GNU/Linux 12 (bookworm) / Raspberry Pi OS 64-bit; kernel `6.12.115+rpt-rpi-v8`.
+- Auto-selected target: `aarch64-unknown-linux-musl`.
+- v0.3.5 installer downloaded and SHA-256-verified the archive (`OK`), and installed the binary under `~/.local/bin`.
+- Runtime: `whydown 0.3.5` and read-only `diagnose --focus services --since 24h --max-events 5000` completed.
+- Current systemd results: two failed system units and one failed user unit, consistent with prior source-built runs.
+- The tested installer did not invoke Cargo, but Rust/Cargo were present on the test host. This is not a test on a Rust-free installation.
+- Other CPU/kernel combinations, all feature areas, and other Linux distributions remain outside this manual validation.
