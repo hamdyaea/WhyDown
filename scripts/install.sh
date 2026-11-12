@@ -17,7 +17,7 @@ WhyDown Linux installer (x86_64 and aarch64)
   (no options)           Download verified static musl binary; Rust is NOT required
   --from-source          Build checked-out repository using Rust/Cargo
   --check-build-prereqs  Explain missing compiler/Cargo prerequisites
-  --check-gui-prereqs    Verify optional Python 3 and Tkinter (exit 1 if missing)
+  --check-gui-prereqs    Verify optional Python 3 and PyQt6 (exit 1 if missing)
   --print-target         Display detected target without installing
   --dry-run              Show selected binary without downloading
   --desktop              Install an optional local application-menu launcher
@@ -81,35 +81,35 @@ GUIDE
 }
 if [ "$MODE" = check ]; then prereqs; exit $?; fi
 
-# GUI dependencies are optional for the Rust CLI/TUI. Check whether Python 3
-# can actually import Tkinter; finding the executable alone is not enough.
+# Qt6 GUI dependencies are optional for the Rust CLI/TUI. Check whether Python 3
+# can actually import PyQt6.QtWidgets; finding the executable alone is not enough.
 # No display server is needed for this preflight; no packages are installed.
 gui_prereqs() {
     missing=0
     if command -v python3 >/dev/null 2>&1; then
         version=$(python3 --version 2>&1 || :)
         say "GUI dependency OK: Python 3 available (${version:-version unavailable})"
-        if python3 -c 'import tkinter' >/dev/null 2>&1; then
-            say "GUI dependency OK: Tkinter import succeeded"
+        if python3 -c 'from PyQt6.QtWidgets import QApplication' >/dev/null 2>&1; then
+            say "GUI dependency OK: PyQt6 QtWidgets import succeeded"
         else
-            say "GUI dependency MISSING: Tkinter could not be imported by python3"
+            say "GUI dependency MISSING: PyQt6 QtWidgets could not be imported by python3"
             missing=1
         fi
     else
         say "GUI dependency MISSING: python3 is not on PATH"
-        say "GUI dependency MISSING: Tkinter cannot be checked without Python 3"
+        say "GUI dependency MISSING: PyQt6 cannot be checked without Python 3"
         missing=1
     fi
     if [ "$missing" -ne 0 ]; then
-        say "WhyDown CLI and TUI remain fully usable without Python/Tkinter."
+        say "WhyDown CLI and TUI remain fully usable without Python/PyQt6."
         if command -v pacman >/dev/null 2>&1; then
-            say "Manjaro / Arch: sudo pacman -S python tk"
+            say "Manjaro / Arch: sudo pacman -S python python-pyqt6"
         elif command -v apt-get >/dev/null 2>&1; then
-            say "Debian / Ubuntu: sudo apt install python3 python3-tk"
+            say "Debian / Ubuntu: sudo apt install python3 python3-pyqt6"
         elif command -v dnf >/dev/null 2>&1; then
-            say "Fedora: sudo dnf install python3 python3-tkinter"
+            say "Fedora: sudo dnf install python3 python3-pyqt6"
         else
-            say "Install Python 3 and your distribution's Tkinter/Tk package to enable the GUI."
+            say "Install Python 3 and your distribution's Qt6 PyQt6 package to enable the GUI."
         fi
         say "No packages were installed or changed."
         return 1
@@ -215,7 +215,7 @@ case ":$PATH:" in *":$PREFIX/bin:"*) ;;
     *) say "If needed: export PATH=\"$PREFIX/bin:\$PATH\"" ;;
 esac
 say "Try: $PREFIX/bin/whydown demo"
-say "GUI (optional Python 3 + Tk): $PREFIX/bin/whydown gui"
+say "GUI (optional Python 3 + PyQt6): $PREFIX/bin/whydown gui"
 say "Checking optional GUI prerequisites (the CLI/TUI never require them):"
 if gui_prereqs; then
     gui_ready=1
@@ -250,7 +250,7 @@ EOF
         { rm -f -- "$desktop_tmp"; fail "Cannot install desktop launcher"; }
     say "Desktop launcher: $appdir/whydown.desktop"
     if [ "$gui_ready" -eq 0 ]; then
-        say "WARNING: The desktop launcher was created, but the GUI will not start until Python 3/Tkinter is available."
+        say "WARNING: The desktop launcher was created, but the GUI will not start until Python 3/PyQt6 is available."
         say "Recheck later with: sh scripts/install.sh --check-gui-prereqs"
     fi
 fi
