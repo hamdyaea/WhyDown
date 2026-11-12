@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.5.1] - 2026-11-12
+
+### Added
+- Live, continuously refreshed progress bar for slow diagnostic runs, automatically shown when stderr is an interactive terminal. Displays completed phases, progress percentage, active collector command and elapsed time, including during potentially slow pacman, dpkg, df, systemd and journalctl checks.
+- `--progress` to force progress in noninteractive sessions (newline-based stderr without ANSI control characters), and `--no-progress` to disable it. The default is auto: interactive stderr only.
+- Progress is exclusively written to stderr; stdout text, HTML and JSON and saved report files are unchanged. A failed report write does not falsely mark the diagnostic 100% successful.
+- Dedicated progress formatter/worker tests and integration assertions for JSON purity, forced progress and suppressed progress.
+
+### Compatibility
+- Percentage measures *completed diagnostic phases*, never a predicted remaining time or percentage of files/bytes scanned. Existing collector timeouts, read-only behavior, default CLI result codes and JSON schema v2 remain unchanged.
+- The no-progress library collector API remains available.
+
 ## [0.5.0] - 2026-11-12
 
 ### Added

@@ -91,6 +91,28 @@ fn overwriting_report_replaces_it_and_keeps_private_permissions() {
 }
 
 #[test]
+fn forced_progress_uses_stderr_without_corrupting_json_stdout() {
+    let result = whydown(&["demo", "--format", "json", "--progress"]);
+    assert!(result.status.success());
+    let report = String::from_utf8(result.stdout).unwrap();
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(report.starts_with('{'));
+    assert!(report.contains("\"schema_version\": 2"));
+    assert!(!report.contains("Diagnostic complete"));
+    assert!(stderr.contains("100% (3/3) Diagnostic complete"));
+    assert!(stderr.contains("[####################]"));
+    assert!(!stderr.contains("\u{1b}"), "non-TTY forced progress should not contain ANSI");
+}
+
+#[test]
+fn silent_progress_does_not_pollute_stderr() {
+    let result = whydown(&["demo", "--format", "json", "--no-progress"]);
+    assert!(result.status.success());
+    assert!(result.stderr.is_empty());
+    assert!(String::from_utf8(result.stdout).unwrap().starts_with('{'));
+}
+
+#[test]
 fn rejects_unknown_arguments() {
     let result = whydown(&["diagnose", "--since", "100d"]);
     assert!(!result.status.success());

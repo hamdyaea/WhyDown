@@ -1,4 +1,5 @@
 use crate::model::Focus;
+use crate::progress::ProgressMode;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub struct Cli {
     pub current_boot: bool,
     /// For automation: exit with status 1 when a warning is present.
     pub exit_on_warning: bool,
+    pub progress_mode: ProgressMode,
 }
 
 impl Default for Cli {
@@ -56,6 +58,7 @@ impl Default for Cli {
             disk_details: false,
             current_boot: false,
             exit_on_warning: false,
+            progress_mode: ProgressMode::Auto,
         }
     }
 }
@@ -104,6 +107,16 @@ impl Cli {
             }
             if flag == "--exit-on-warning" {
                 cli.exit_on_warning = true;
+                i += 1;
+                continue;
+            }
+            if flag == "--progress" {
+                cli.progress_mode = ProgressMode::Always;
+                i += 1;
+                continue;
+            }
+            if flag == "--no-progress" {
+                cli.progress_mode = ProgressMode::Never;
                 i += 1;
                 continue;
             }
@@ -183,6 +196,8 @@ OPTIONS
   --max-events N   maximum journal entries examined (default: 500)
   --current-boot   restrict journal observations to the current boot
   --exit-on-warning  exit with code 1 if any WARNING was found (default: 0)
+  --progress       force live diagnostic progress on stderr (even without TTY)
+  --no-progress    suppress live diagnostic progress (auto on a terminal)
   --format VALUE   text | json | html (default: text)
   --output FILE    write report to a new file (use --overwrite to replace)
   --overwrite      allow replacing an existing output file
@@ -193,6 +208,7 @@ OPTIONS
 EXAMPLES
   whydown diagnose --focus network --since 2h --current-boot
   whydown diagnose --focus system --exit-on-warning
+  whydown diagnose --focus all --current-boot --progress
   whydown diagnose --focus system --disk-details
   whydown diagnose --format json --output report.json
   whydown diagnose --format html --output report.html
@@ -234,6 +250,14 @@ mod tests {
         let defaults = Cli::default();
         assert!(!defaults.current_boot);
         assert!(!defaults.exit_on_warning);
+    }
+
+    #[test]
+    fn progress_is_auto_by_default_and_flags_toggle_it() {
+        assert_eq!(Cli::default().progress_mode, ProgressMode::Auto);
+        assert_eq!(Cli::parse(["diagnose", "--progress"]).unwrap().progress_mode, ProgressMode::Always);
+        assert_eq!(Cli::parse(["diagnose", "--no-progress"]).unwrap().progress_mode, ProgressMode::Never);
+        assert_eq!(Cli::parse(["--progress", "--no-progress"]).unwrap().progress_mode, ProgressMode::Never);
     }
 
     #[test]
