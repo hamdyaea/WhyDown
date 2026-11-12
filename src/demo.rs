@@ -1,6 +1,7 @@
 //! Deterministic example inputs for screenshots and smoke tests.
 
-use crate::model::{DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats, Snapshot};
+use crate::model::{DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats,
+    MemoryHealth, PressureHealth, FileHandleHealth, InodeHealth, Snapshot};
 use crate::time::now_unix;
 
 pub fn snapshot() -> Snapshot {
@@ -28,6 +29,21 @@ pub fn snapshot() -> Snapshot {
             name: "example-kernel-headers".into(), state: "unpacked".into(),
             reinstall_required: false,
         }],
+        memory_health: Some(MemoryHealth {
+            total_kib: 4_194_304, available_kib: 2_097_152,
+            swap_total_kib: Some(1_048_576), swap_free_kib: Some(786_432),
+        }),
+        pressure_health: vec![PressureHealth {
+            resource: "memory".into(), some_avg60_x100: Some(15),
+            full_avg60_x100: Some(0),
+        }],
+        file_handle_health: Some(FileHandleHealth {
+            allocated: 1280, unused: 0, maximum: 524_288,
+        }),
+        inode_health: vec![InodeHealth {
+            mountpoint: "/".into(), used_percent: 18,
+        }],
+        raid_health: vec![],
         disks: vec![DiskUsage { mountpoint: "/".into(), used_percent: 64 }],
         disk_breakdowns: vec![],
         events: vec![

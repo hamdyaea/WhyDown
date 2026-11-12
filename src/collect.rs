@@ -71,6 +71,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
     }
 
     if focus.includes(Focus::System) {
+        crate::health::collect_kernel(&mut snapshot);
         // pacman -Dk checks local package database consistency without any
         // sync/installation/removal, and only when pacman's DB is present.
         if fs::metadata("/var/lib/pacman/local").is_ok() {
@@ -106,6 +107,16 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         match run_capture("df", &["-PT"]) {
             Ok((true, output)) => snapshot.disks = parse_df(&output),
             _ => snapshot.notes.push("Filesystem usage unavailable".into()),
+        }
+        // Filter inode warnings using the same writable-capable mounts
+        // from df -PT to avoid false alarms from immutable image filesystems.
+        let mounts: Vec<String> = snapshot.disks.iter().map(|d| d.mountpoint.clone()).collect();
+        if !mounts.is_empty() {
+            match run_capture("df", &["-Pi"]) {
+                Ok((true, output)) =>
+                    snapshot.inode_health = crate::health::parse_inodes(&output, &mounts),
+                _ => snapshot.notes.push("Filesystem inode counts unavailable".into()),
+            }
         }
         if disk_details {
             // Optional: GNU du recursively walks the filesystem, possibly slowly.

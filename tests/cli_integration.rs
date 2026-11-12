@@ -35,6 +35,13 @@ fn json_output_has_schema_fields() {
     assert!(output.contains("\"system_units_checked\""));
     assert!(output.contains("\"dpkg_checked\": true"));
     assert!(output.contains("\"dpkg_problem_count\": 1"));
+    assert!(output.contains("\"memory\""));
+    assert!(output.contains("\"total_kib\": 4194304"));
+    assert!(output.contains("\"pressure\""));
+    assert!(output.contains("\"some_avg60_percent_x100\": 15"));
+    assert!(output.contains("\"file_handles\""));
+    assert!(output.contains("\"inodes\""));
+    assert!(output.contains("\"md_arrays\""));
     assert!(output.contains("\"DPKG_INCOMPLETE_PACKAGES\""));
     assert!(output.contains("\"boot_relation\""));
     assert!(output.contains("\"timeline\""));

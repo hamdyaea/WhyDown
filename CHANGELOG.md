@@ -2,6 +2,19 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.5.0] - 2026-11-12
+
+### Added
+- Cross-distribution read-only Linux host sensor module: memory available/swap from procfs, CPU/memory/I/O PSI 60-second averages, kernel-wide file-handle allocation, inode utilization and Linux MD software RAID member counts.
+- Conservative warning IDs: `LOW_MEMORY_HEADROOM`, `MEMORY_STALL_PRESSURE`, `IO_STALL_PRESSURE`, `FILE_HANDLE_LIMIT_NEAR`, `INODE_NEAR_FULL`, `MD_RAID_DEGRADED`. All are current snapshots and do not assert verified root cause.
+- Bounded procfs input reads (128 KiB max per source), bounded inodes and array lists, no raw process information or disk member paths. Sensors not exposed by a kernel remain absent rather than being reported healthy.
+- Cross-format text, self-contained HTML and additive JSON-v2 host resource metrics; PSI averages are encoded as integer hundredths of a percent.
+- Regression fixtures for healthy/degraded MD arrays, no-inode/immutable mounts, malformed file counts, memory headroom and low/high PSI.
+- Manjaro manual validation update: WhyDown v0.4.1 pacman -Dk matched command-line pacman and the binary installation passed checksums.
+
+### Limitations
+- The new rules do not cover every failure mode or replace SMART, application, GPU, Btrfs/ZFS, hardware RAID or active network tests. Container-specific quotas can differ from host readings. Real-world tests of v0.5.0 on the target distributions remain pending.
+
 ## [0.4.1] - 2026-11-12
 
 ### Added
