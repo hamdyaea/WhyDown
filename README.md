@@ -5,12 +5,12 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.7.1 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.8.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
 - **Read-only by design:** never restarts services, changes configuration, installs packages, or escalates privileges.
-- **Interactive terminal interface (v0.8.0 development):** run `whydown tui` for a number-and-Enter evidence browser with focus/lookback configuration, incident timeline, findings, current-unit snapshots, limitations and safe export guidance. `whydown tui --demo` does not read host data. Requires a real terminal; see [TUI guide](docs/TUI.md).
+- **Interactive terminal interface (v0.8.0):** run `whydown tui` for a number-and-Enter evidence browser with focus/lookback configuration, incident timeline, findings, current-unit snapshots, limitations and safe export guidance. `whydown tui --demo` does not read host data. Requires a real terminal; see [TUI guide](docs/TUI.md).
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
 - **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM/storage errors, and incomplete dpkg package states on Debian-family distributions.
@@ -56,7 +56,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.7.1/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.8.0/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -213,7 +213,7 @@ whydown demo --format html --output example.html
 
 The demo shows **fictional** Wi-Fi disconnect, DHCP failure, DNS error and a failed service. It does not access system logs, network sockets or external services.
 
-### Interactive terminal browser (in development for v0.8.0)
+### Interactive terminal browser (v0.8.0)
 
 ```bash
 cargo run -- tui --demo
@@ -488,7 +488,7 @@ whydown diagnose --since 24h --max-events 5000 --format json --output report.jso
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.7.1 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.8.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -571,10 +571,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.6.1 (released):** increase default journal tail to 5,000, detect true truncation with N+1 sentinel, explicitly disclose partial journal coverage and prevent misleading no-anomaly conclusions when older entries were excluded.
 - **v0.7.0 (released):** correlate Wi-Fi reassociation and local-choice roaming, systemd restart scheduling, and USB-detachment bursts; sample network drop counter deltas; add informational 85–89% disk utilization advice.
 - **v0.7.1 (released):** refine USB disconnect grouping by root-port branch, avoid assuming event ordering within the same journal second, and add bounded read-only current systemd unit-state snapshots after attributable historical service failures. Verified in live Manjaro source tests and with the published x86_64-musl release archive; application readiness and hardware root causes remain outside the tool's claims.
-- **v0.8.0 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
+- **v0.8.0 (released):** interactive, dependency-free terminal evidence browser with configurable focus, journal lookback, current-boot filter and entry cap, findings with explanations/evidence, timeline, collection coverage and safe export guidance; supports fictional demo mode and rejects non-TTY automation. Existing diagnostic engine and JSON schema v2 remain unchanged. Manual release-binary TTY validation pending.
+- **v0.9.0 (planned):** more cross-distribution test fixtures, optional privacy-conscious evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.7.1: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.8.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
