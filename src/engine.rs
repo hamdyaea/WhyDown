@@ -386,6 +386,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
 }
 
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
+    crate::health::assess(snapshot, findings);
     if snapshot.pacman_checked == Some(true) && snapshot.pacman_consistent == Some(false) {
         findings.push(Finding {
             id: "PACMAN_DATABASE_CHECK_FAILED",
