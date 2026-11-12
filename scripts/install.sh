@@ -17,6 +17,7 @@ WhyDown Linux installer (x86_64 and aarch64)
   (no options)           Download verified static musl binary; Rust is NOT required
   --from-source          Build checked-out repository using Rust/Cargo
   --check-build-prereqs  Explain missing compiler/Cargo prerequisites
+  --check-gui-prereqs    Verify optional Python 3 and Tkinter (exit 1 if missing)
   --print-target         Display detected target without installing
   --dry-run              Show selected binary without downloading
   --desktop              Install an optional local application-menu launcher
@@ -31,6 +32,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --from-source) MODE=source; shift ;;
         --check-build-prereqs) MODE=check; shift ;;
+        --check-gui-prereqs) MODE=gui-check; shift ;;
         --print-target) MODE=target; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --desktop) DESKTOP=1; shift ;;
@@ -78,6 +80,47 @@ GUIDE
     fi
 }
 if [ "$MODE" = check ]; then prereqs; exit $?; fi
+
+# GUI dependencies are optional for the Rust CLI/TUI. Check whether Python 3
+# can actually import Tkinter; finding the executable alone is not enough.
+# No display server is needed for this preflight; no packages are installed.
+gui_prereqs() {
+    missing=0
+    if command -v python3 >/dev/null 2>&1; then
+        version=$(python3 --version 2>&1 || :)
+        say "GUI dependency OK: Python 3 available (${version:-version unavailable})"
+        if python3 -c 'import tkinter' >/dev/null 2>&1; then
+            say "GUI dependency OK: Tkinter import succeeded"
+        else
+            say "GUI dependency MISSING: Tkinter could not be imported by python3"
+            missing=1
+        fi
+    else
+        say "GUI dependency MISSING: python3 is not on PATH"
+        say "GUI dependency MISSING: Tkinter cannot be checked without Python 3"
+        missing=1
+    fi
+    if [ "$missing" -ne 0 ]; then
+        say "WhyDown CLI and TUI remain fully usable without Python/Tkinter."
+        if command -v pacman >/dev/null 2>&1; then
+            say "Manjaro / Arch: sudo pacman -S python tk"
+        elif command -v apt-get >/dev/null 2>&1; then
+            say "Debian / Ubuntu: sudo apt install python3 python3-tk"
+        elif command -v dnf >/dev/null 2>&1; then
+            say "Fedora: sudo dnf install python3 python3-tkinter"
+        else
+            say "Install Python 3 and your distribution's Tkinter/Tk package to enable the GUI."
+        fi
+        say "No packages were installed or changed."
+        return 1
+    fi
+    say "GUI dependencies available (a graphical X11/XWayland session is still required)."
+    return 0
+}
+if [ "$MODE" = gui-check ]; then
+    gui_prereqs
+    exit $?
+fi
 target() {
     case "$(uname -m)" in
         x86_64|amd64) cpu=x86_64 ;;
@@ -106,7 +149,11 @@ if [ "$MODE" = source ]; then
     [ -f "$repo_dir/Cargo.toml" ] ||
         fail "--from-source requires the complete WhyDown Git checkout"
     prereqs || exit 1
-    if [ "$DRY_RUN" -eq 1 ]; then say "Dry run: source build at $repo_dir"; exit 0; fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "Dry run: source build at $repo_dir"
+        gui_prereqs || :
+        exit 0
+    fi
     (cd "$repo_dir" && cargo build --release --locked)
     # Validate a staging executable before replacing a working installation.
     mkdir -p "$PREFIX/bin"
@@ -125,7 +172,11 @@ else
     say "Selected target: $release_target"
     say "Download: $url"
     say "Install: $PREFIX/bin/whydown"
-    if [ "$DRY_RUN" -eq 1 ]; then say "Dry run: nothing downloaded or changed."; exit 0; fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "Dry run: nothing downloaded or changed."
+        gui_prereqs || :
+        exit 0
+    fi
     for tool in curl sha256sum tar mktemp install mv chmod; do
         command -v "$tool" >/dev/null 2>&1 ||
             fail "Missing $tool; on Debian/Raspberry Pi OS install curl coreutils tar"
@@ -165,6 +216,12 @@ case ":$PATH:" in *":$PREFIX/bin:"*) ;;
 esac
 say "Try: $PREFIX/bin/whydown demo"
 say "GUI (optional Python 3 + Tk): $PREFIX/bin/whydown gui"
+say "Checking optional GUI prerequisites (the CLI/TUI never require them):"
+if gui_prereqs; then
+    gui_ready=1
+else
+    gui_ready=0
+fi
 if [ "$DESKTOP" -eq 1 ]; then
     appdir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
     mkdir -p "$appdir" || fail "Cannot create desktop application directory"
@@ -192,4 +249,8 @@ EOF
     mv -f -- "$desktop_tmp" "$appdir/whydown.desktop" ||
         { rm -f -- "$desktop_tmp"; fail "Cannot install desktop launcher"; }
     say "Desktop launcher: $appdir/whydown.desktop"
+    if [ "$gui_ready" -eq 0 ]; then
+        say "WARNING: The desktop launcher was created, but the GUI will not start until Python 3/Tkinter is available."
+        say "Recheck later with: sh scripts/install.sh --check-gui-prereqs"
+    fi
 fi
