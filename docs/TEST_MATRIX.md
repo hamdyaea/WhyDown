@@ -1,10 +1,10 @@
 # Cross-distribution validation matrix
 
-**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were manually exercised with v0.3.5 as root and later as the normal user. The **v0.3.6 dpkg diagnostic has now been validated live**, identifying four kernel packages in incomplete states while both systemd managers reported zero failed units. JSON/HTML exports on the VM still require manual checking.
+**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro was manually tested with v0.4.0 on 2026-11-12 (x86_64 static-musl installer, current-boot all-focus diagnostic, JSON export and no-warning exit code 0). On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were manually exercised with v0.3.5 as root and later as the normal user. The **v0.3.6 dpkg diagnostic has now been validated live**, identifying four kernel packages in incomplete states while both systemd managers reported zero failed units. JSON/HTML exports on the VM still require manual checking.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | Tested through v0.3.3; retest v0.3.5 installer | NetworkManager, XFS /var, pacman cache, reboots |
+| Manjaro | x86_64 | v0.4.0 static-musl install and SHA-256 passed; current-boot all-focus report showed wlan0 up, IPv4/IPv6 routes present, 0 failed system/user units; JSON saved, return code 0 with no warnings. **v0.4.1 pacman check still needs on-host testing.** | NetworkManager, XFS /var, pacman local DB, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
 | Debian 13 (Trixie) VM | x86_64 | **v0.3.6 dpkg detection validated live**: `all` and `system` reported exactly four incompletely configured kernel packages previously confirmed by `dpkg --audit`; zero failed system/user units. Static-musl installation and previous text diagnostics also tested. JSON/HTML exports pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
@@ -95,3 +95,12 @@ The finding was `DPKG_INCOMPLETE_PACKAGES`, severity `WARN`, scope `current_snap
 - Test report overwrite: existing file is protected by default; explicit `--overwrite` replaces a report using private 0600 permissions and atomic rename.
 - Test bounded child output and timeout with synthetic commands. Limitations should identify failed collection instead of claiming a clean system.
 - Do not claim new manual Raspberry Pi OS, Debian, Manjaro or VM validation until v0.4.0 is actually executed on the respective host. These additions are subject to GitHub Actions tests only at publication time.
+
+
+## Manjaro x86_64 — v0.4.0 live validation (2026-11-12)
+
+- Downloaded and installed `whydown-v0.4.0-x86_64-unknown-linux-musl.tar.gz` with the installer. SHA-256 verification succeeded; running `~/.local/bin/whydown --version` returned `0.4.0`.
+- On Manjaro Linux kernel `7.2.9-1-MANJARO`, `diagnose --focus all --current-boot --since 24h --max-events 5000` returned no classified anomalies in examined observations. The snapshot showed `wlan0` up, both default routes present and zero currently failed system/user systemd units.
+- The system also exposed a dpkg database reporting 0 incomplete states, **not a valid pacman health check**. v0.4.1 adds a separate native pacman check.
+- A JSON report was saved with `--exit-on-warning`; its exit code was 0 (no warning), as expected. The warning exit code 1 was not manually tested on Manjaro; automated tests cover it.
+- Pending: actual v0.4.1 pacman output on Manjaro/CachyOS, HTML export and failure-injection checks.
