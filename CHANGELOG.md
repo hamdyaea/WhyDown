@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [Unreleased]
+
+### Added
+- Introduce a read-only interactive terminal mode (`whydown tui`) with a number-and-Enter menu for focus/lookback/current-boot configuration, per-finding evidence and suggested checks, classified timeline, collection limitations and copyable report commands.
+- `whydown tui --demo` uses the existing fictional data fixture without reading local system information.
+- Require interactive stdin and stdout for TUI use, rejecting pipelines and automation, as well as incompatible export/monitoring flags. No raw terminal mode, new dependencies or external `stty` invocation.
+- Sanitize terminal control characters in evidence strings before display; invalidate stale reports after changing scope.
+- Add TUI unit tests and integration tests for interactive navigation, demonstration isolation, EOF, unsafe output combinations and non-terminal execution.
+
+### Compatibility
+- Preserve normal `whydown diagnose` / `demo` text, JSON v2 and HTML output, exit codes, read-only behavior and all v0.7.1 diagnostics.
+- The TUI presents existing evidence only. An active service is not proof of application readiness; there are no active network probes and no automatic exports.
+
+
 ## [0.7.1] - 2026-11-12
 
 ### Added

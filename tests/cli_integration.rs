@@ -9,6 +9,28 @@ fn whydown(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn interactive_tui_rejects_pipes_without_hanging_or_reading_system_data() {
+    let result = whydown(&["tui", "--demo"]);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(result.stdout.is_empty());
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(stderr.contains("requires stdin and stdout to be terminals"));
+}
+
+#[test]
+fn interactive_tui_rejects_report_output_flags() {
+    for invalid in [
+        vec!["tui", "--output", "report.json"],
+        vec!["tui", "--format", "json"],
+        vec!["tui", "--exit-on-warning"],
+    ] {
+        let result = whydown(&invalid);
+        assert_eq!(result.status.code(), Some(2));
+        assert!(String::from_utf8(result.stderr).unwrap().contains("not supported"));
+    }
+}
+
+#[test]
 fn demo_has_evidence_and_no_real_system_data() {
     let result = whydown(&["demo", "--focus", "network"]);
     assert!(result.status.success());

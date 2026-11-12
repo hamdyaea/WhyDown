@@ -11,6 +11,7 @@ pub mod model;
 pub mod progress;
 pub mod render;
 pub mod time;
+pub mod tui;
 
 pub use cli::{Cli, Command, OutputFormat};
 pub use engine::analyze;

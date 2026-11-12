@@ -21,6 +21,12 @@ fn run() -> Result<u8, String> {
             println!("whydown {}", env!("CARGO_PKG_VERSION"));
             return Ok(0);
         }
+        Command::Tui => {
+            if !cfg!(target_os = "linux") && !cli.tui_demo {
+                return Err("Live TUI diagnostics require Linux; try 'whydown tui --demo' for a fictional session.".into());
+            }
+            return whydown::tui::run(cli);
+        }
         _ => {}
     }
 

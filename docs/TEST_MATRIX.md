@@ -245,3 +245,17 @@ The **installed release executable** completed:
 - Historical `USB_DISCONNECT_BURST` reported exactly **10 distinct USB topology paths under root-port branch `1-1`** within 30 seconds beginning `2026-11-12T15:01:42Z`, with a nearby Realtek `r8152` USB transport error.
 
 **Validated:** released x86_64-musl artifact, checksum verification, version, JSON output, full journal window, bounded service-status collection and branch-aware USB grouping on Manjaro. **Not validated:** root causes, continuous network reachability, graphical HTML rendering on this host, and the release archives for other architectures/libc variants.
+## v0.8.0 interactive terminal validation plan (in development)
+
+- Unit tests use an in-memory input/output transcript and a fictional demo
+  report to exercise menu navigation, evidence details, timeline, coverage,
+  scope invalidation and exit behavior without reading the host.
+- CLI integration tests assert that a TUI invocation from a pipe fails
+  immediately with exit code 2 rather than hanging or consuming system data.
+- CLI rejects output formats/paths and warning-driven exit controls in TUI
+  mode, preserving the noninteractive JSON, text and HTML behavior.
+- The TUI sanitizes control characters in journal-derived identifiers and
+  evidence to prevent terminal escape injection.
+- Linux x86_64 and ARM64 CI compile/test the same Rust source without new
+  third-party crates. Interactive testing on a real Manjaro TTY and over SSH
+  is **pending**; no claims of that test are made yet.
