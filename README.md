@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.9.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.9.1 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -57,7 +57,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.9.0/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.9.1/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -225,6 +225,9 @@ The demo shows **fictional** Wi-Fi disconnect, DHCP failure, DNS error and a fai
 
 # Optional: create a clickable user application-menu entry while installing
 sh scripts/install.sh --desktop
+
+# Recheck GUI dependencies only, with no download or installation
+sh scripts/install.sh --check-gui-prereqs
 ```
 
 **How it works:** choose the scope if desired (**all** is preselected), click
@@ -232,7 +235,7 @@ sh scripts/install.sh --desktop
 tab. No menu sequence or terminal keyboard shortcuts are required. Results are
 produced by the same local read-only Rust engine; nothing is uploaded. JSON
 exports are saved only when explicitly selected. The GUI requires Python 3,
-Tkinter, and a graphical session (X11/XWayland), while the CLI and TUI remain
+Tkinter, and a graphical session (X11/XWayland). The installer verifies `python3` and `import tkinter` automatically after installing, and `--check-gui-prereqs` checks them independently without installing anything. If missing, it prints the appropriate package-manager command (for Manjaro: `sudo pacman -S python tk`); no packages are automatically installed. The CLI and TUI remain
 usable without them. See [desktop GUI guide](docs/GUI.md).
 
 ### Guided terminal browser (improved in v0.9.0)
@@ -515,7 +518,7 @@ whydown diagnose --since 24h --max-events 5000 --format json --output report.jso
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.9.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.9.1 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -601,10 +604,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.8.0 (released):** interactive, dependency-free terminal evidence browser with configurable focus, journal lookback, current-boot filter and entry cap, findings with explanations/evidence, timeline, collection coverage and safe export guidance; supports fictional demo mode and rejects non-TTY automation. Existing diagnostic engine and JSON schema v2 remain unchanged.
 - **v0.8.1 (released):** clarify number-plus-Enter TUI controls, remove the extra pause that could swallow input after diagnosis, show setting-change feedback, and allow menu shortcuts at detail-page return prompts. Add real Linux PTY navigation tests to CI and release checks; on-host published-binary verification pending.
 - **v0.9.0 (released):** optional offline Tkinter desktop GUI, embedded in the Rust binary and launched with `whydown gui`; focus **all** by default, one-click diagnostics, immediate findings/evidence, timeline and coverage tabs, safe opt-in JSON export, guided CLI/TUI defaults and clearer analyze-first terminal flow. `install.sh --desktop` can create an explicit opt-in application launcher. CI includes Python GUI model tests and an actual Tk window under Xvfb; real Manjaro desktop testing remains pending.
+- **v0.9.1 (released):** installer checks optional Python 3 and a working `tkinter` import, prints actionable distribution-specific package advice, warns if a new desktop shortcut cannot yet launch the GUI, and adds a standalone `--check-gui-prereqs` preflight. CLI/TUI installs stay valid without Python/Tk; no automatic package installation or privilege escalation. Dedicated installer smoke tests cover Python/Tk missing or available.
 - **v0.10.0 (planned):** broader cross-distribution test fixtures, optional privacy-conscious evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.9.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.9.1: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
