@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
+use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
 use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
@@ -18,6 +18,16 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
 pub fn collect_with_progress(
     focus: Focus, since_unix: u64, max_events: usize,
     disk_details: bool, current_boot: bool, progress: &Progress,
+) -> Snapshot {
+    collect_with_options(focus, since_unix, max_events, disk_details, current_boot, false, progress)
+}
+
+/// Avoid remote and network-backed FUSE mounts by default, which may cause
+/// statfs to block or fail. An opt-in scan preserves full coverage.
+pub fn collect_with_options(
+    focus: Focus, since_unix: u64, max_events: usize,
+    disk_details: bool, current_boot: bool,
+    include_remote_mounts: bool, progress: &Progress,
 ) -> Snapshot {
     let mut snapshot = Snapshot {
         os: read_os_name().unwrap_or_else(|| "Unknown Linux".into()),
@@ -51,7 +61,7 @@ pub fn collect_with_progress(
         }
         if snapshot.dns_stub {
             progress.detail("systemctl is-active systemd-resolved (max 20s)");
-            snapshot.resolved_active = match run_capture("systemctl", &["is-active", "systemd-resolved.service"]) {
+            snapshot.resolved_active = match capture_timed(&mut snapshot, "systemd-resolved", "systemctl", &["is-active", "systemd-resolved.service"]) {
                 Ok((_, output)) => Some(output.trim() == "active"),
                 Err(_) => {
                     snapshot.notes.push("Cannot determine systemd-resolved state".into());
@@ -68,7 +78,7 @@ pub fn collect_with_progress(
     if focus.includes(Focus::Services) {
         progress.begin("Checking systemd services");
         progress.detail("systemctl --failed (max 20s)");
-        match run_capture("systemctl", &["list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
+        match capture_timed(&mut snapshot, "systemd system units", "systemctl", &["list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
             Ok((true, output)) => {
                 snapshot.failed_units = parse_failed_units(&output);
                 snapshot.system_units_checked = true;
@@ -79,7 +89,7 @@ pub fn collect_with_progress(
         // User and system units belong to separate systemd managers.
         // A missing user bus means unknown, not zero failed user units.
         progress.detail("systemctl --user --failed (max 20s)");
-        match run_capture("systemctl", &["--user", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
+        match capture_timed(&mut snapshot, "systemd user units", "systemctl", &["--user", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
             Ok((true, output)) => snapshot.failed_user_units = Some(parse_failed_units(&output)),
             Ok((false, _)) => snapshot.notes.push("User systemd manager unavailable; user units not checked".into()),
             Err(_) => snapshot.notes.push("systemctl --user unavailable; user units not checked".into()),
@@ -96,7 +106,7 @@ pub fn collect_with_progress(
         if fs::metadata("/var/lib/pacman/local").is_ok() {
             progress.detail("pacman -Dk (max 20s)");
             snapshot.pacman_checked = Some(false);
-            match run_capture("pacman", &["-Dk"]) {
+            match capture_timed(&mut snapshot, "pacman -Dk", "pacman", &["-Dk"]) {
                 Ok((success, _)) => {
                     snapshot.pacman_checked = Some(true);
                     snapshot.pacman_consistent = Some(success);
@@ -111,7 +121,7 @@ pub fn collect_with_progress(
         if fs::metadata("/var/lib/dpkg/status").is_ok() {
             progress.detail("dpkg-query (max 20s)");
             snapshot.dpkg_checked = Some(false);
-            match run_capture("dpkg-query",
+            match capture_timed(&mut snapshot, "dpkg-query", "dpkg-query",
                 &["--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\n"]) {
                 Ok((true, output)) => {
                     let problems = parse_dpkg_status(&output);
@@ -125,20 +135,51 @@ pub fn collect_with_progress(
                     "dpkg status database found but dpkg-query unavailable; package health not verified".into()),
             }
         }
-        progress.detail("df -PT (max 20s)");
-        match run_capture("df", &["-PT"]) {
-            Ok((true, output)) => snapshot.disks = parse_df(&output),
-            _ => snapshot.notes.push("Filesystem usage unavailable".into()),
+        if !include_remote_mounts {
+            if let Ok(info) = fs::read_to_string("/proc/self/mountinfo") {
+                if has_remote_mounts(&info) {
+                    snapshot.notes.push("Remote or network-backed FUSE filesystem usage excluded by default; use --include-remote-mounts to include (may be slow)".into());
+                }
+            }
         }
-        // Filter inode warnings using the same writable-capable mounts
-        // from df -PT to avoid false alarms from immutable image filesystems.
+        progress.detail(if include_remote_mounts {
+            "df -PT (including remote mounts; max 20s)"
+        } else {
+            "df -PT --local (excluding remote/FUSE; max 20s)"
+        });
+        match capture_timed(&mut snapshot, "df disk usage", "df", df_args(false, include_remote_mounts)) {
+            Ok((complete, output)) => {
+                snapshot.disks = parse_df(&output);
+                if !complete {
+                    snapshot.notes.push(format!(
+                        "Filesystem usage partially collected: df exited nonzero; retained {} valid entries",
+                        snapshot.disks.len()
+                    ));
+                }
+                if snapshot.disks.is_empty() {
+                    snapshot.notes.push("Filesystem usage unavailable: df returned no valid entries".into());
+                }
+            }
+            Err(error) => snapshot.notes.push(format!(
+                "Filesystem usage unavailable: df failed ({error})"
+            )),
+        }
+        // Keep inodes constrained to the same filesystem selection.
         let mounts: Vec<String> = snapshot.disks.iter().map(|d| d.mountpoint.clone()).collect();
         if !mounts.is_empty() {
-            progress.detail("df -Pi (max 20s)");
-            match run_capture("df", &["-Pi"]) {
-                Ok((true, output)) =>
-                    snapshot.inode_health = crate::health::parse_inodes(&output, &mounts),
-                _ => snapshot.notes.push("Filesystem inode counts unavailable".into()),
+            progress.detail(if include_remote_mounts {
+                "df -Pi (including remote mounts; max 20s)"
+            } else {
+                "df -Pi --local (excluding remote/FUSE; max 20s)"
+            });
+            match capture_timed(&mut snapshot, "df inode usage", "df", df_args(true, include_remote_mounts)) {
+                Ok((complete, output)) => {
+                    snapshot.inode_health = crate::health::parse_inodes(&output, &mounts);
+                    if !complete {
+                        snapshot.notes.push("Inode usage partially collected: df exited nonzero; existing entries retained".into());
+                    }
+                }
+                Err(error) => snapshot.notes.push(format!("Filesystem inode counts unavailable: df failed ({error})")),
             }
         }
         if disk_details {
@@ -152,7 +193,7 @@ pub fn collect_with_progress(
             }
             for path in paths {
                 progress.detail("du --max-depth=2 (max 120s; optional disk details)");
-                match run_capture("du", &["-x", "-k", "--max-depth=2", "--", path.as_str()]) {
+                match capture_timed(&mut snapshot, "du disk details", "du", &["-x", "-k", "--max-depth=2", "--", path.as_str()]) {
                     Ok((ok, output)) => {
                         let entries = parse_du(&output, &path);
                         if !ok {
@@ -179,7 +220,7 @@ pub fn collect_with_progress(
     if current_boot { journal_args.push("--boot=0"); }
     journal_args.push(since_arg.as_str());
     journal_args.push(count_arg.as_str());
-    match run_capture("journalctl", &journal_args) {
+    match capture_timed(&mut snapshot, "journalctl", "journalctl", &journal_args) {
         Ok((true, output)) => {
             let lines: Vec<&str> = output.lines().collect();
             // With --lines N, a long journal may contain earlier entries not read here.
@@ -231,6 +272,55 @@ fn unquote_os_release(value: &str) -> String {
 /// Bounded external collection: individual commands are never allowed to
 /// block a diagnosis indefinitely or retain unlimited stdout in memory.
 /// No shell, privilege escalation, network probes or data mutation.
+/// `df` should not stat remote mounts by default. Explicitly exclude the
+/// most common network-backed FUSE types, which GNU df may treat as local.
+fn df_args(inodes: bool, include_remote: bool) -> &'static [&'static str] {
+    match (inodes, include_remote) {
+        (false, true) => &["-PT"],
+        (true, true) => &["-Pi"],
+        (false, false) => &[
+            "-PT", "--local", "--exclude-type=fuse.rclone",
+            "--exclude-type=fuse.sshfs", "--exclude-type=fuse.s3fs",
+            "--exclude-type=fuse.davfs", "--exclude-type=fuse.gvfsd-fuse",
+        ],
+        (true, false) => &[
+            "-Pi", "--local", "--exclude-type=fuse.rclone",
+            "--exclude-type=fuse.sshfs", "--exclude-type=fuse.s3fs",
+            "--exclude-type=fuse.davfs", "--exclude-type=fuse.gvfsd-fuse",
+        ],
+    }
+}
+
+/// Detect known remote mounts only by parsing mountinfo; never stat them.
+/// Other network filesystem types may exist and remain unrecognized.
+fn has_remote_mounts(content: &str) -> bool {
+    content.lines().any(|line| {
+        let Some((_, details)) = line.split_once(" - ") else { return false };
+        let Some(kind) = details.split_whitespace().next() else { return false };
+        matches!(kind,
+            "nfs" | "nfs4" | "cifs" | "smb3" | "9p" | "ceph" |
+            "fuse.rclone" | "fuse.sshfs" | "fuse.s3fs" |
+            "fuse.davfs" | "fuse.gvfsd-fuse")
+    })
+}
+
+/// Time every external collector without exposing command output or arguments.
+/// Details appear in the report so transient slowdowns can be attributed.
+fn capture_timed(
+    snapshot: &mut Snapshot, label: &'static str,
+    command: &str, args: &[&str],
+) -> io::Result<(bool, String)> {
+    let start = Instant::now();
+    let result = run_capture(command, args);
+    let ms = start.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    snapshot.collector_timings.push(CollectorTiming {
+        name: label,
+        elapsed_ms: ms,
+        succeeded: matches!(&result, Ok((true, _))),
+    });
+    result
+}
+
 fn run_capture(command: &str, args: &[&str]) -> io::Result<(bool, String)> {
     let seconds = if command == "du" { 120 } else if command == "journalctl" { 45 } else { 20 };
     let max_bytes = if command == "journalctl" { 32 * 1024 * 1024 } else { 16 * 1024 * 1024 };
@@ -615,6 +705,29 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_df_default_skips_remote_mounts_but_full_scan_is_opt_in() {
+        assert!(df_args(false, false).contains(&"--local"));
+        assert!(df_args(true, false).contains(&"--exclude-type=fuse.rclone"));
+        assert_eq!(df_args(false, true), &["-PT"]);
+        assert_eq!(df_args(true, true), &["-Pi"]);
+        let mounts = "10 1 0:20 / /mnt/onedrive rw - fuse.rclone rclone rw\n\
+11 1 0:21 / /home rw - ext4 /dev/sda1 rw\n";
+        assert!(has_remote_mounts(mounts));
+        assert!(!has_remote_mounts("11 1 0:21 / /home rw - ext4 /dev/sda1 rw\n"));
+    }
+
+    #[test]
+    fn command_timings_are_recorded_without_raw_output() {
+        let mut s = Snapshot::default();
+        let result = capture_timed(&mut s, "synthetic test", "printf", &["OK"]).unwrap();
+        assert!(result.0);
+        assert_eq!(result.1, "OK");
+        assert_eq!(s.collector_timings.len(), 1);
+        assert_eq!(s.collector_timings[0].name, "synthetic test");
+        assert!(s.collector_timings[0].succeeded);
+    }
 
     #[test]
     fn ipv4_route_works() {
