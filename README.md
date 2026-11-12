@@ -555,7 +555,7 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.6.0 (released):** fix kernel interface attribution, validate DNS IP literals, distinguish missing evidence from no anomaly, record boot-filtered incident provenance, and add informational root/CPU observations plus historical file descriptor exhaustion classification.
 - **v0.6.1 (released):** increase default journal tail to 5,000, detect true truncation with N+1 sentinel, explicitly disclose partial journal coverage and prevent misleading no-anomaly conclusions when older entries were excluded.
 - **v0.7.0 (released):** correlate Wi-Fi reassociation and local-choice roaming, systemd restart scheduling, and USB-detachment bursts; sample network drop counter deltas; add informational 85–89% disk utilization advice.
-- **v0.5 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
+- **v0.8.0 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
 Features not implemented in v0.7.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
