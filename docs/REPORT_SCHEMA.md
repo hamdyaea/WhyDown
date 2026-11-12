@@ -41,3 +41,12 @@ Do not silently parse schema 2 as schema 1. For distribution comparisons, use fi
 - `findings[].id=FAILED_USER_SYSTEMD_UNITS` signals current user-unit failures; `SERVICE_FAILURE_LOGS` remains a historical journal observation.
 
 A service that exited with code 1 may have automatically restarted, and a SIGTERM signal may occur during shutdown. Check the surrounding journal and the present system/user manager states before interpreting these observations. Reports never establish that a service is currently stopped simply because it failed historically.
+
+
+## Additions in WhyDown v0.3.2 (schema still 2)
+
+- `service_event_windows[].boot_relation`: `before_current_boot_estimate`, `since_current_boot_estimate`, `spans_boot_estimate` or `unknown`. Derived from report generation time minus `system.uptime_seconds`; this is not a true journal boot ID. Time synchronization and wall-clock changes can affect the estimate.
+- Privilege escalation audit records can contain command-line arguments with diagnostic phrases. Such command text is not a genuine failed service/network/storage event and is excluded from classification when identified as an audit command record.
+- `SERVICE_FAILURE_LOGS` evidence may mention how many classified messages predate the estimated current boot.
+
+All extensions are additive; `schema_version` remains 2.

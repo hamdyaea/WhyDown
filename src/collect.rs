@@ -332,7 +332,15 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
             None => continue,
         };
         let body = parts.next().unwrap_or("");
+        let source = event_source(body);
         let lower = body.to_ascii_lowercase();
+        // sudo/doas/pkexec audit records frequently contain the full invoked
+        // command. Words in --grep patterns or arguments are not observed
+        // service, network, memory or storage failures.
+        let privilege_wrapper = matches!(source.as_deref(), Some("sudo" | "doas" | "pkexec"));
+        if privilege_wrapper && (lower.contains("command=") || lower.contains("cmd=")) {
+            continue;
+        }
         if lower.contains("stopping network manager")
             || lower.contains("starting network manager")
             || (lower.contains("networkmanager[") && (
@@ -341,6 +349,9 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
             network_transition_until = unix.saturating_add(60);
         }
         let kind = match classify_log_line(body) { Some(k) => k, None => continue };
+        // A privilege wrapper reporting a command error is not systemd
+        // declaring a service unit failure. Keep genuine systemd entries.
+        if privilege_wrapper && kind == EventKind::ServiceFailure { continue; }
         if matches!(kind, EventKind::LinkDown | EventKind::DhcpProblem)
             && unix <= network_transition_until {
             continue;
@@ -348,7 +359,7 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
         let subject = event_subject(body, kind);
         if seen.insert((unix, kind.as_str(), subject.clone())) {
             events.push(Event {
-                timestamp: unix, kind, subject, source: event_source(body),
+                timestamp: unix, kind, subject, source,
             });
         }
     }
@@ -469,6 +480,25 @@ mod tests {
         assert_eq!(event[0].kind, EventKind::DnsProblem);
         assert_eq!(event[0].subject, None);
         assert_eq!(event[0].source.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn sudo_audit_search_terms_do_not_become_service_or_network_failures() {
+        // Reproduces the semantics of an audit record generated when a user
+        // searches for failures. Arguments are NOT evidence of such failures.
+        let audit = "1794441081.5 host sudo[1234]: admin : TTY=pts/1 ; PWD=/tmp ; USER=root ; COMMAND=/usr/bin/journalctl --grep=Failed to start|Failed with result|network is unreachable\n";
+        assert!(parse_journal(audit).is_empty());
+        let quoted = "1794441082.5 host sudo[1234]: failed to start was passed as command text\n";
+        assert!(parse_journal(quoted).is_empty());
+    }
+
+    #[test]
+    fn real_systemd_unit_failures_remain_visible_after_audit_filter() {
+        let log = "1794441083.5 host systemd[100]: rclone-onedrive.service: Failed with result 'exit-code'.\n";
+        let events = parse_journal(log);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::ServiceFailure);
+        assert_eq!(events[0].subject.as_deref(), Some("rclone-onedrive.service"));
     }
 
     #[test]

@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.2] - 2026-11-12
+
+### Fixed
+
+- Avoid classifying sudo/doas/pkexec command audit messages as real service/network/storage failures when the command arguments merely include diagnostic phrases (for example, journalctl --grep patterns).
+- Avoid classifying privilege-wrapper service-error text as a systemd unit failure.
+- Keep real systemd failures visible, with a regression test for the search-term false positive.
+
+### Improved
+
+- Show an approximate boot relation for historical service-message windows, based on current uptime and report time, to distinguish entries older than the current boot.
+- Indicate that wall-clock adjustments can make the boot-time estimate inaccurate. No raw journal logs or network probes are added.
+- Update README and JSON schema reference without changing JSON schema version 2.
+
 ## [0.3.1] - 2026-11-12
 
 ### Improved
