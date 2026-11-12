@@ -186,3 +186,5 @@ The user installed the static-musl v0.6.1 release with successful SHA-256 verifi
 - Compare two /proc/net/dev samples without additional delay; report packet-drop deltas in terminal, JSON, HTML; exclude resets and unmatched interfaces. Informational changes require >=10 drops over >=100ms.
 - Filesystem advisory at 85–89% is informational, >=90% is still a warning; no disk cleanup is attempted.
 - Current branch and CI test all outputs automatically. Manual v0.7.0 testing on Manjaro, Debian 13 and Raspberry Pi OS is still pending.
+
+Isolated r8152 -71 messages produce an informational `USB_TRANSPORT_STATUS` rather than a hardware fault warning; <=3 USB detachments or detaches outside the 30-second window do not trigger the burst finding.
