@@ -21,6 +21,7 @@ pub fn snapshot() -> Snapshot {
         interface_drop_deltas: None,
         failed_units: vec!["example-backup.service".into()],
         system_units_checked: true,
+        service_statuses: vec![],
         failed_user_units: Some(vec![]),
         dpkg_checked: Some(true),
         dpkg_problem_count: 1,

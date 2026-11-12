@@ -4,6 +4,12 @@ All notable changes to WhyDown will be documented here.
 
 ## [Unreleased]
 
+### Added
+- For up to four recognized systemd **system** services with historical failure journal messages, query a current read-only `systemctl show` snapshot (3-second timeout and 8 KiB output cap per unit). Record validated `LoadState`, `ActiveState`, `SubState`, `Result` and `NRestarts` in additive `system.service_statuses` JSON, text and HTML. These observations supplement restart evidence without replacing historical warnings or implying application readiness.
+- Validate bounded unit identifiers before passing them as subprocess arguments; unavailable, user-only or missing system units remain unverified, not healthy.
+- Regression tests for a real-style LightDM `ActiveState=active`, `SubState=running`, `Result=success`, `NRestarts=1` snapshot and all report formats.
+- Group USB disconnect bursts by **root-port topology branch** as well as the existing 30-second window, avoiding false aggregation of unrelated detaches from separate USB root ports. Regression case: two paths on `1-5` plus two on `1-1` are not one burst.
+
 ### Fixed
 - Avoid asserting that a Wi-Fi association happened *after* local-choice deauthentication or link loss when both are retained in the same whole-second journal bucket; co-occurrence is still reported, with event order explicitly unknown. Preserve the validated 18-second reassociation evidence when seconds differ.
 - Label USB disconnect bursts as **topology-path detachments** rather than a count of distinct devices or independent faults.

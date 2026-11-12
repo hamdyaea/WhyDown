@@ -258,6 +258,18 @@ pub struct ServiceEventWindow {
     pub units: Vec<String>,
 }
 
+/// Read-only current system-manager state for a journal-attributed service.
+/// Active does not imply application readiness and cannot prove a past recovery.
+#[derive(Debug, Clone)]
+pub struct ServiceStatus {
+    pub unit: String,
+    pub load_state: String,
+    pub active_state: String,
+    pub sub_state: String,
+    pub result: String,
+    pub n_restarts: Option<u64>,
+}
+
 /// One package that is not fully configured in the local dpkg status database.
 #[derive(Debug, Clone)]
 pub struct DpkgProblem {
@@ -326,6 +338,9 @@ pub struct Snapshot {
     pub interface_drop_deltas: Option<Vec<NetworkDropDelta>>,
     pub failed_units: Vec<String>,
     pub system_units_checked: bool,
+    /// At most four system-manager unit snapshots attributed to historical failures.
+    /// Empty means none collected, not that every historical failure recovered.
+    pub service_statuses: Vec<ServiceStatus>,
     /// None when the user's systemd manager is inaccessible.
     pub failed_user_units: Option<Vec<String>>,
     /// None: dpkg status database absent (not a dpkg-managed system).
@@ -379,6 +394,7 @@ impl Default for Snapshot {
             interface_drop_deltas: None,
             failed_units: Vec::new(),
             system_units_checked: false,
+            service_statuses: Vec::new(),
             failed_user_units: None,
             dpkg_checked: None,
             dpkg_problem_count: 0,

@@ -505,6 +505,13 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 for (unit, when) in &matched_restarts {
                     evidence.push(format!("{}: restart scheduled at {}; this alone does not confirm recovery",
                         unit, utc_timestamp(*when)));
+                    if let Some(state) = snapshot.service_statuses.iter().find(|s| &s.unit == unit) {
+                        evidence.push(format!(
+                            "{}: current system-manager state is {}/{} (result={}, restarts={}); this is not application readiness",
+                            unit, state.active_state, state.sub_state, state.result,
+                            state.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+                        ));
+                    }
                 }
                 if snapshot.system_units_checked && snapshot.failed_units.is_empty() {
                     evidence.push("Current systemd snapshot has zero failed system units; past failures may have recovered".into());
@@ -538,16 +545,36 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 Some((unit.clone(), restart.timestamp))
             } else { None }
         }) {
+        let state = snapshot.service_statuses.iter().find(|s| s.unit == unit);
+        let mut evidence = vec![format!(
+            "{}: restart scheduled at {}; absent from current failed-unit list",
+            unit, utc_timestamp(when)
+        )];
+        if let Some(state) = state {
+            evidence.push(format!(
+                "Current systemctl show: load={}, active={}, sub={}, result={}, NRestarts={}",
+                state.load_state, state.active_state, state.sub_state, state.result,
+                state.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
+            ));
+        }
         findings.push(Finding {
             id: "SERVICE_RESTART_OBSERVED",
             severity: Severity::Info,
-            confidence: Confidence::Limited,
-            title: "Service restart scheduled and unit not currently failed".into(),
-            explanation: "Systemd scheduled a restart and the later failed-unit snapshot does not list that unit. Successful application readiness is not proven.".into(),
-            evidence: vec![format!("{}: restart scheduled at {}; absent from current failed-unit list", unit, utc_timestamp(when))],
-            checks: vec![format!("Confirm current status using systemctl status {} and review subsequent service logs", unit)],
+            confidence: if state.is_some() { Confidence::Observed } else { Confidence::Limited },
+            title: if state.is_some_and(|s| s.active_state == "active") {
+                "Service restart scheduled; unit currently active in systemd"
+            } else {
+                "Service restart scheduled; current unit readiness not verified"
+            }.into(),
+            explanation: "Systemd scheduled a restart. A separate read-only system-manager snapshot may confirm the unit is currently active, but cannot prove the application is ready, or that it ran continuously after the failure.".into(),
+            evidence,
+            checks: vec![format!("Review surrounding journal and service/application health for {}", unit)],
         });
     }
+}
+
+fn usb_root_port(path: &str) -> &str {
+    path.split('.').next().unwrap_or(path)
 }
 
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
@@ -656,18 +683,23 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
             });
         }
     }
-    // A group of USB detachments in 30 seconds may represent a single hub
-    // unplugging; do not treat every child as an independent hardware fault.
+    // Group only paths under the SAME USB root-port topology branch.
+    // A burst spanning different root ports can represent unrelated actions.
+    // A subtree detachment can also represent ONE hub loss, not many faults.
     let usb: Vec<&Event> = events.iter().filter(|e| e.kind == EventKind::UsbDisconnect).collect();
     let mut usb_burst_reported = false;
     for start in usb.iter().take(64) {
+        let Some(start_path) = start.subject.as_deref() else { continue };
+        let root_port = usb_root_port(start_path);
         let affected: std::collections::HashSet<String> = usb.iter()
             .filter(|e| e.timestamp >= start.timestamp && e.timestamp - start.timestamp <= 30)
-            .filter_map(|e| e.subject.clone()).collect();
+            .filter_map(|e| e.subject.as_deref())
+            .filter(|path| usb_root_port(path) == root_port)
+            .map(str::to_owned).collect();
         if affected.len() >= 4 {
             let mut evidence = vec![format!(
-                "{} distinct USB topology paths detached within 30 seconds beginning {}",
-                affected.len(), utc_timestamp(start.timestamp)
+                "{} distinct USB topology paths on root-port branch {} detached within 30 seconds beginning {}",
+                affected.len(), root_port, utc_timestamp(start.timestamp)
             )];
             if events.iter().any(|e| e.kind == EventKind::UsbTransportError
                 && e.timestamp.abs_diff(start.timestamp) <= 30) {
@@ -679,7 +711,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
                 severity: Severity::Warning,
                 confidence: Confidence::Observed,
                 title: "Multiple USB topology paths detached in one short interval".into(),
-                explanation: "Several USB paths detached close together. A dock or hub being unplugged or powered down is possible; this does not prove a hardware fault or causation of later network events.".into(),
+                explanation: "Several USB topology paths under one root-port branch detached close together. This may be a single hub/dock detachment or power event; it does not prove independent device faults, physical cause or causation of later network events.".into(),
                 evidence,
                 checks: vec![
                     "Check whether a dock/hub was intentionally unplugged, powered off or reset".into(),
@@ -777,6 +809,37 @@ mod tests {
     }
 
     #[test]
+    fn active_unit_snapshot_enriches_restart_without_erasing_failure() {
+        let events = vec![
+            Event {timestamp: 100, kind: EventKind::ServiceFailure,
+                subject: Some("lightdm.service".into()), source: Some("systemd".into())},
+            Event {timestamp: 100, kind: EventKind::ServiceRestartScheduled,
+                subject: Some("lightdm.service".into()), source: Some("systemd".into())},
+        ];
+        let report = analyze(Snapshot {
+            system_units_checked: true,
+            failed_units: vec![],
+            events,
+            service_statuses: vec![crate::model::ServiceStatus {
+                unit: "lightdm.service".into(),
+                load_state: "loaded".into(),
+                active_state: "active".into(),
+                sub_state: "running".into(),
+                result: "success".into(),
+                n_restarts: Some(1),
+            }],
+            ..Snapshot::default()
+        }, 3600, Focus::Services, false);
+        assert!(report.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+        let restart = report.findings.iter().find(|f|
+            f.id == "SERVICE_RESTART_OBSERVED").unwrap();
+        assert_eq!(restart.confidence, Confidence::Observed);
+        assert!(restart.evidence.iter().any(|text|
+            text.contains("active=active") && text.contains("NRestarts=1")));
+        assert!(restart.explanation.contains("cannot prove the application is ready"));
+    }
+
+    #[test]
     fn wifi_association_must_match_the_same_interface() {
         let events = vec![
             Event {timestamp: 100, kind: EventKind::LinkDown,
@@ -831,6 +894,35 @@ mod tests {
             ..Snapshot::default()
         }, 3600, Focus::System, false);
         assert!(!distant.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"));
+    }
+
+    #[test]
+    fn usb_burst_does_not_mix_distinct_root_port_branches() {
+        let e = |port: &str| Event {
+            timestamp: 100,
+            kind: EventKind::UsbDisconnect,
+            subject: Some(port.to_owned()),
+            source: Some("kernel".into()),
+        };
+        let mixed = analyze(Snapshot {
+            events: vec![e("1-5"), e("1-5.1"), e("1-1"), e("1-1.1")],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        assert!(!mixed.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"),
+            "events on separate USB root ports must not count as one burst");
+
+        let cascade = analyze(Snapshot {
+            events: vec![
+                e("1-5"), e("1-5.1"), e("1-1"), e("1-1.1"),
+                e("1-1.1.1"), e("1-1.1.2"),
+            ],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        let finding = cascade.findings.iter().find(|f|
+            f.id == "USB_DISCONNECT_BURST").unwrap();
+        assert!(finding.evidence.iter().any(|line|
+            line.contains("4 distinct USB topology paths on root-port branch 1-1")));
+        assert!(!finding.evidence.iter().any(|line| line.contains("6 distinct")));
     }
 
     #[test]

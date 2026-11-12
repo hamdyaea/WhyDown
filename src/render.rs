@@ -142,6 +142,14 @@ pub fn text(report: &Report) -> String {
         } else {
             writeln!(out, "  User manager: not checked").unwrap();
         }
+        if !report.snapshot.service_statuses.is_empty() {
+            writeln!(out, "  Targeted unit states (read-only system manager snapshot; not app health):").unwrap();
+            for unit in &report.snapshot.service_statuses {
+                writeln!(out, "    {}: load={} active={} sub={} result={} NRestarts={}",
+                    unit.unit, unit.load_state, unit.active_state, unit.sub_state, unit.result,
+                    unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
+            }
+        }
         writeln!(out).unwrap();
     }
 
@@ -364,6 +372,14 @@ pub fn json(report: &Report) -> String {
             ("resolved_active", opt_bool(s.resolved_active)),
             ("failed_units", arr(s.failed_units.iter().cloned().map(js).collect())),
             ("system_units_checked", JsonValue::Bool(s.system_units_checked)),
+            ("service_statuses", arr(s.service_statuses.iter().map(|unit| object(vec![
+                ("unit", js(unit.unit.clone())),
+                ("load_state", js(unit.load_state.clone())),
+                ("active_state", js(unit.active_state.clone())),
+                ("sub_state", js(unit.sub_state.clone())),
+                ("result", js(unit.result.clone())),
+                ("n_restarts", opt_num(unit.n_restarts)),
+            ])).collect())),
             ("failed_user_units", match &s.failed_user_units {
                 Some(items) => arr(items.iter().cloned().map(js).collect()),
                 None => JsonValue::Null,
@@ -624,6 +640,17 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
                 None => "not checked".into(),
             }).unwrap();
         out.push_str("</p>");
+        if !report.snapshot.service_statuses.is_empty() {
+            out.push_str("<h3>Targeted current unit states</h3><p class=\"muted\">System-manager state only; application readiness is not verified.</p><ul>");
+            for unit in &report.snapshot.service_statuses {
+                write!(out, "<li><code>{}</code>: load={}, active={}, sub={}, result={}, NRestarts={}</li>",
+                    html_escape(&unit.unit), html_escape(&unit.load_state),
+                    html_escape(&unit.active_state), html_escape(&unit.sub_state),
+                    html_escape(&unit.result),
+                    unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
+            }
+            out.push_str("</ul>");
+        }
     }
     if !report.service_event_windows.is_empty() {
         out.push_str("<h2>Historical service message windows</h2><p class=\"muted\">Time clusters, not independent failed services or proof of a current outage.</p>");
@@ -694,6 +721,35 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn targeted_systemd_state_is_rendered_and_not_confused_with_app_readiness() {
+        let mut snapshot = demo::snapshot();
+        snapshot.failed_units.clear();
+        snapshot.service_statuses = vec![crate::model::ServiceStatus {
+            unit: "example-backup.service".into(),
+            load_state: "loaded".into(),
+            active_state: "active".into(),
+            sub_state: "running".into(),
+            result: "success".into(),
+            n_restarts: Some(1),
+        }];
+        snapshot.events.push(crate::model::Event {
+            timestamp: crate::time::now_unix(),
+            kind: crate::model::EventKind::ServiceRestartScheduled,
+            subject: Some("example-backup.service".into()),
+            source: Some("systemd".into()),
+        });
+        let report = engine::analyze(snapshot, 3600, Focus::All, true);
+        assert!(text(&report).contains("active=active sub=running result=success NRestarts=1"));
+        let j = json(&report);
+        assert!(j.contains("\"service_statuses\""));
+        assert!(j.contains("\"n_restarts\": 1"));
+        let h = html(&report);
+        assert!(h.contains("Targeted current unit states"));
+        assert!(h.contains("application readiness is not verified"));
+        assert!(report.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+    }
 
     #[test]
     fn sampled_drop_deltas_are_rendered_separately_from_cumulative_totals() {
