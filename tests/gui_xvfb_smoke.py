@@ -86,7 +86,7 @@ try:
     expected = gui.selected_rows(gui.event_tree)
     assert gui.copy_active_selection()
     assert root.clipboard_get() == expected
-    assert "\\t" in expected, "Timeline rows should have tab-separated columns"
+    assert chr(9) in expected, "Timeline rows should have tab-separated columns"
 
     # Context menu and Ctrl+C bindings are explicitly installed.
     assert gui.detail.bind("<Button-3>")
