@@ -16,6 +16,24 @@ Use an interactive Bash, Zsh or SSH terminal. Both stdin and stdout must be
 attached to a TTY. Pipelines, CI and scheduled jobs should use `whydown diagnose`
 instead. Non-terminal TUI use immediately fails with a clear message and exit 2.
 
+## Navigation improvements in v0.8.1
+
+Always type the selected number and press **Enter**. Unlike the initial
+v0.8.0 menu, the dashboard now explains this visibly and confirms changes
+to focus, time range, current-boot scope and journal cap.
+
+After option 1 completes a diagnostic, **you can immediately enter option 6**
+to inspect findings, 7 for events, or 8 for collection coverage. There is no
+extra continue prompt that can absorb the next number.
+
+On a detailed evidence, timeline, coverage or export page, press **Enter** to
+return to the dashboard, or type a dashboard option 1–9 followed by Enter to
+run that action next. Selecting a changed focus/time scope clears the last
+report and requires option 1 to run a fresh diagnostic.
+
+The first-party CI now includes a Linux pseudo-terminal test that exercises
+real input/output for these transitions, not just in-memory menu fixtures.
+
 ## Navigation (number + Enter)
 
 The UI is line-oriented by design: no raw terminal mode, ncurses, third-party Rust

@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.8.1] - 2026-11-12
+
+### Fixed
+- Make the number-plus-Enter interaction explicit at the TUI dashboard and show visible status feedback after changing focus, lookback, current-boot filter or journal cap.
+- Remove the extra pause after a completed interactive diagnostic: the next number (especially 6, 7 or 8) is handled directly instead of disappearing.
+- From a finding/detail, timeline, coverage or export page, forward menu numbers 1–9 typed at the return prompt to the dashboard, rather than silently consuming them. Pressing Enter alone returns normally.
+- Clearly explain why changing settings resets the previous report and that option 1 is required to recollect. Offer suitable guidance for a partial journal window depending on whether the cap is 5,000 or 10,000.
+
+### Tests
+- Reproduce the previously swallowed post-diagnostic 6 and detail-to-timeline 7 in Rust regression tests.
+- Add a real Linux pseudo-terminal (PTY) smoke test using only the Python standard library to drive `tui --demo` end-to-end through actual terminal input/output.
+- Run that PTY test in both normal Rust CI and the release workflow before publication. No new third-party Rust dependency, network probe or privileged operation.
+- User-reported v0.8.0 terminal navigation issue motivates the fix; live Manjaro validation of the published v0.8.1 executable is still pending.
+
 ## [0.8.0] - 2026-11-12
 
 ### Added
