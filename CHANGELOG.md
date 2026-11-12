@@ -12,6 +12,7 @@ All notable changes to WhyDown will be documented here.
 ### Tests and documentation
 - Offline installer tests cover default musl target, GNU override, successful installation, and rejected candidate rollback.
 - README and test matrix document the v0.3.4 GNU ABI failure and the subsequent successful v0.3.5 ARM64 static-musl installation and service-diagnostic test on Raspberry Pi OS (2026-11-12).
+- Debian 13 (Trixie) x86_64 VM: v0.3.5 binary installation and text diagnostics (`all`, `network`, `services`, `system`) manually exercised as root. User systemd manager and export formats remain unverified; a separate dpkg failure is outside current diagnostic coverage.
 - Diagnostics and JSON schema version 2 unchanged.
 
 ## [0.3.4] - 2026-11-12
