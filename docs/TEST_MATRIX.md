@@ -4,7 +4,7 @@
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | **v0.4.1 tested live:** binary install/sha passed; pacman database check passed and matched pacman -Dk; optional dpkg check independently reported 0. v0.5.0 host resource probes still need a manual run. | NetworkManager, XFS /var, pacman local DB, reboots |
+| Manjaro | x86_64 | **v0.7.0 tested live on 2026-11-12:** static-musl installer and SHA-256 passed; all-focus current-boot JSON analyzed 5,356 journal entries without truncation; USB, Wi-Fi, LightDM, disk and network-counter features observed. | NetworkManager, XFS /var, pacman local DB, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
 | Debian 13 (Trixie) VM | x86_64 | **v0.3.6 dpkg detection validated live**: `all` and `system` reported exactly four incompletely configured kernel packages previously confirmed by `dpkg --audit`; zero failed system/user units. Static-musl installation and previous text diagnostics also tested. JSON/HTML exports pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
@@ -188,3 +188,23 @@ The user installed the static-musl v0.6.1 release with successful SHA-256 verifi
 - Current branch and CI test all outputs automatically. Manual v0.7.0 testing on Manjaro, Debian 13 and Raspberry Pi OS is still pending.
 
 Isolated r8152 -71 messages produce an informational `USB_TRANSPORT_STATUS` rather than a hardware fault warning; <=3 USB detachments or detaches outside the 30-second window do not trigger the burst finding.
+
+## Manjaro x86_64 — v0.7.0 complete-window JSON validation (2026-11-12)
+
+User-provided terminal transcript confirms a successful `git pull --ff-only` to `main` commit `7cde6d1`, installer `--dry-run`, automatic `x86_64-unknown-linux-musl` selection, successful SHA-256 verification, installed `~/.local/bin/whydown` and `whydown 0.7.0` output. No package installation, repair or network probes were made by the diagnostic.
+
+```bash
+~/.local/bin/whydown diagnose --focus all --current-boot --since 3h --max-events 10000 --format json --output whydown-v070-live.json --overwrite
+```
+
+- Live Manjaro report: kernel `7.2.9-1-MANJARO` from earlier same-day host snapshots; this transcript did not separately repeat the kernel version.
+- `journal_entries_examined=5356`, `journal_truncated=false`, diagnostic completed in approximately one second.
+- `LINK_DISCONNECTS`: `wlan0` disconnection at `15:02:07Z`, association at `15:02:25Z` (18 s later); no verified Internet probe.
+- `WIFI_LOCAL_ROAM_OBSERVED`: local-choice deauthentication and association both at `14:18:57Z`; exact within-second order **cannot be inferred**. A later `15:03:19Z` roam-start and association also co-occur within one second. This motivated the follow-up wording fix.
+- `SERVICE_FAILURE_LOGS` and `SERVICE_RESTART_OBSERVED`: `lightdm.service` historical failure and scheduled restart at `14:16:01Z`; no currently failed system units. Application/session readiness was not verified.
+- `USB_DISCONNECT_BURST`: 12 distinct USB **topology paths** detached in a 30-second window beginning `15:01:24Z`, with nearby Realtek `r8152` transport status. A hub/dock power-off or cascade is plausible, not established.
+- `DISK_CAPACITY_WATCH`: `/home` at 88%, `/opt` at 86% (current df snapshots), both below the 90% warning threshold.
+- `interface_drop_deltas`: `wlan0` RX +0, TX +0 over 1,074 ms; a one-second no-change window does not certify ongoing packet-loss absence.
+- Network incident grouping reported one historical link incident and no spurious zero-count association-only incidents.
+
+**Validated:** installer, JSON report, journal completeness, observed findings/correlations, sampled interface deltas. **Still pending:** post-fix live host rerun, formal manual HTML review, independent cause attribution for USB or LightDM, and broader distribution/platform testing. Avoid publishing raw journal identifiers or site-specific details from private logs.
