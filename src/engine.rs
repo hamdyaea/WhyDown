@@ -697,6 +697,82 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wifi_usb_service_and_capacity_findings_are_contextual() {
+        let ev = |t, kind, subject: Option<&str>| Event {
+            timestamp: t, kind, subject: subject.map(str::to_owned),
+            source: Some("kernel".into()),
+        };
+        let mut snapshot = Snapshot {
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            disks: vec![
+                crate::model::DiskUsage { mountpoint: "/home".into(), used_percent: 88 },
+                crate::model::DiskUsage { mountpoint: "/opt".into(), used_percent: 86 },
+            ],
+            events: vec![
+                ev(100, EventKind::UsbDisconnect, Some("1-1")),
+                ev(100, EventKind::UsbDisconnect, Some("1-1.1")),
+                ev(101, EventKind::UsbDisconnect, Some("1-1.2")),
+                ev(101, EventKind::UsbDisconnect, Some("1-1.3")),
+                ev(110, EventKind::LinkDown, Some("wlan0")),
+                ev(128, EventKind::WifiAssociated, Some("wlan0")),
+                ev(180, EventKind::WifiRoamStart, Some("wlan0")),
+                ev(180, EventKind::WifiAssociated, Some("wlan0")),
+                ev(50, EventKind::ServiceFailure, Some("lightdm.service")),
+                ev(50, EventKind::ServiceRestartScheduled, Some("lightdm.service")),
+            ],
+            interface_drop_deltas: Some(vec![crate::model::NetworkDropDelta {
+                name: "wlan0".into(), rx_dropped_delta: 12, tx_dropped_delta: 1,
+                elapsed_ms: 1300,
+            }]),
+            ..Snapshot::default()
+        };
+        snapshot.events.sort_by_key(|e| e.timestamp);
+        let report = analyze(snapshot, 3600, Focus::All, false);
+        for id in [
+            "USB_DISCONNECT_BURST", "DISK_CAPACITY_WATCH",
+            "WIFI_LOCAL_ROAM_OBSERVED", "SERVICE_RESTART_OBSERVED",
+            "RECENT_INTERFACE_DROPS",
+        ] {
+            assert!(report.findings.iter().any(|f| f.id == id), "missing {id}");
+        }
+        let link = report.findings.iter().find(|f| f.id == "LINK_DISCONNECTS").unwrap();
+        assert!(link.evidence.iter().any(|x| x.contains("18 seconds")));
+        let service = report.findings.iter().find(|f| f.id == "SERVICE_FAILURE_LOGS").unwrap();
+        assert!(service.evidence.iter().any(|x| x.contains("restart scheduled")));
+        assert_eq!(report.network_incidents.len(), 1,
+            "positive reassociation alone must not create an incident window");
+    }
+
+    #[test]
+    fn wifi_association_must_match_the_same_interface() {
+        let events = vec![
+            Event {timestamp: 100, kind: EventKind::LinkDown,
+                subject: Some("wlan0".into()), source: None},
+            Event {timestamp: 112, kind: EventKind::WifiAssociated,
+                subject: Some("wlan1".into()), source: None},
+        ];
+        assert!(nearby_matching_subjects(&events,
+            EventKind::LinkDown, EventKind::WifiAssociated, 30).is_none());
+    }
+
+    #[test]
+    fn disk_threshold_information_only_until_90_percent() {
+        for percent in [84, 85, 89, 90] {
+            let snapshot = Snapshot {
+                disks: vec![crate::model::DiskUsage {
+                    mountpoint: "/test".into(), used_percent: percent
+                }], ..Snapshot::default()
+            };
+            let report = analyze(snapshot, 3600, Focus::System, false);
+            let info = report.findings.iter().any(|f| f.id == "DISK_CAPACITY_WATCH");
+            let warning = report.findings.iter().any(|f| f.id == "DISK_NEAR_FULL");
+            assert_eq!(info, (85..90).contains(&percent));
+            assert_eq!(warning, percent >= 90);
+        }
+    }
+
+    #[test]
     fn correlate_link_before_dns() {
         let events = vec![
             Event { timestamp: 100, kind: EventKind::LinkDown, subject: None, source: None },
