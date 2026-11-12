@@ -16,9 +16,19 @@ whydown gui --demo
 The full Python/Tkinter frontend is **embedded in the Rust release binary**. No
 separate Python script download, pip package or new Rust crate is needed. A
 local Python 3 interpreter with Tkinter is required **only for the graphical
-mode**. On Manjaro/Arch, verify GUI support with `python3 -m tkinter`; if the
-Tk module is missing, install the distribution's Tk package (normally `tk`).
-On Debian/Ubuntu, this is typically `python3-tk`. X11 or XWayland is needed
+mode**. Before using the desktop GUI, **the installer automatically checks Python 3
+and whether `python3 -c 'import tkinter'` succeeds**. The standalone check
+also works without downloading/installing WhyDown:
+
+```bash
+sh scripts/install.sh --check-gui-prereqs
+```
+
+The check exits 0 when both are available and 1 if either is missing. It does
+not start a GUI or test the window system. On Manjaro/Arch, the installer
+suggests `sudo pacman -S python tk` when dependencies are missing; on
+Debian/Ubuntu it suggests `sudo apt install python3 python3-tk`. It never
+runs these commands itself. X11 or XWayland is needed
 by Tk on Linux; if there is no graphical display, use `whydown tui`.
 
 To add an **optional application-menu shortcut** when installing:
@@ -31,7 +41,10 @@ The new launcher is written only with explicit `--desktop` consent to
 `${XDG_DATA_HOME:-$HOME/.local/share}/applications/whydown.desktop`, invokes
 the installed binary as `whydown gui`, and uses the system's normal monitoring
 icon. The installer does not require root or install Python/Tk on your behalf.
-Normal installation leaves the applications menu unchanged.
+When `--desktop` is used without the GUI prerequisites, it still creates the
+requested launcher, but emits a clear warning that the GUI cannot start until
+they are supplied. CLI/TUI binaries remain fully functional without either
+Python or Tkinter. Normal installation leaves the applications menu unchanged.
 
 ## User journey: no number menus required
 

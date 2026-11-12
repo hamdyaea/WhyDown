@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.9.1] - 2026-11-12
+
+### Installer usability
+- Automatically check for a `python3` executable and successful `python3 -c 'import tkinter'` after installation, with clear `GUI dependency OK` / `GUI dependency MISSING` diagnostics. Python/Tk remain **optional** for the CLI and TUI.
+- Add `sh scripts/install.sh --check-gui-prereqs`: a standalone read-only preflight that returns 0 when ready and 1 when Python 3 or Tkinter cannot be used. Also show the check on `--dry-run`, without downloading or modifying anything.
+- Give installation suggestions for Manjaro/Arch (pacman), Debian/Ubuntu (apt), Fedora (dnf) and a generic fallback, without executing any package manager or using sudo.
+- When `--desktop` is requested but Python/Tkinter are absent, keep the explicit user-owned launcher and warn that it will not start until the dependencies are installed. The normal CLI/TUI installation still succeeds.
+
+### Validation
+- Add offline installer smoke tests for Python missing, a Python interpreter with Tkinter import failing, a successful import, and non-mutating `--dry-run` including `--desktop`.
+- Run those cases in the existing installer smoke suite for both normal CI and release workflow. No third-party Rust dependencies or diagnostic behavior changes.
+
 ## [0.9.0] - 2026-11-12
 
 ### Desktop GUI

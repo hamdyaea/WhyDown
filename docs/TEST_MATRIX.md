@@ -277,3 +277,11 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - The GUI defaults to **all** checks and offers explicit opt-in remote mount/directory scans; saved JSON requires a user-selected path, uses exclusive creation and private permissions, and does not trigger automatic network or service changes.
 - Installer smoke test validates `--desktop` with a temporary `XDG_DATA_HOME`, verifies the generated XDG application launcher, and checks that normal installation still requires no Tk or system-level GUI configuration.
 - Real interactive GUI testing on Manjaro (X11 or XWayland) and published v0.9.0 binary compatibility on other distributions are **pending**; CI is not a substitute for those manual validations.
+
+## v0.9.1 GUI dependency preflight (installer only)
+
+- Standalone `sh scripts/install.sh --check-gui-prereqs` reports independently whether `python3` exists and whether it can actually import `tkinter`; it exits nonzero if either prerequisite is missing.
+- Normal installer runs the same GUI preflight after installing and preserves successful CLI/TUI installation even if Tkinter is unavailable. With explicit `--desktop`, it warns that the launcher will not yet work rather than silently declaring GUI readiness.
+- The installer and `--dry-run` do not install distribution packages, prompt for sudo, run a GUI, require a display, or make network checks for Tkinter.
+- Dedicated shell smoke tests isolate `PATH` and simulate (1) absent Python, (2) a Python executable with unsuccessful Tkinter import, (3) successful Tkinter import, (4) safe CLI and desktop dry-run paths. The smoke suite runs in both Rust CI and release workflows.
+- This checks module importability only; actual window availability on X11/XWayland and live GUI behavior on Manjaro still require separate desktop validation.

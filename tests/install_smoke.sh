@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 sh -n scripts/install.sh
+sh tests/gui_prereqs_smoke.sh
 sh scripts/install.sh --help | grep -q 'Rust is NOT required'
 sh scripts/install.sh --check-build-prereqs
 target=$(sh scripts/install.sh --print-target)
