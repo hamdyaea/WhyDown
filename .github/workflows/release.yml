@@ -107,6 +107,12 @@ jobs:
           filename="whydown-v${version}-${target}.tar.gz"
           mkdir -p package dist
           cp "target/${target}/release/whydown" package/
+          if [[ "$target" == *-musl ]]; then
+            if readelf -l package/whydown | grep -q INTERP; then
+              echo "ERROR: musl release unexpectedly needs a dynamic loader" >&2
+              exit 1
+            fi
+          fi
           cp README.md LICENSE package/
           cp scripts/install.sh package/install.sh
           ./package/whydown --version | grep -Fx "whydown ${version}"
