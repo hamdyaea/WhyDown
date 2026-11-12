@@ -4,6 +4,7 @@ use crate::model::{Confidence, Event, EventKind, Finding, Focus, NetworkIncident
 use crate::time::{now_unix, utc_timestamp};
 
 pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bool) -> Report {
+    let generated_at = now_unix();
     let mut findings = Vec::new();
     let events: Vec<Event> = snapshot.events.iter().filter(|e| focus.includes(e.kind.focus()))
         .cloned().collect();
@@ -12,7 +13,7 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         diagnose_network(&snapshot, &events, &mut findings);
     }
     if focus.includes(Focus::Services) {
-        diagnose_services(&snapshot, &events, &mut findings);
+        diagnose_services(&snapshot, &events, &mut findings, generated_at);
     }
     if focus.includes(Focus::System) {
         diagnose_system(&snapshot, &events, &mut findings);
@@ -44,7 +45,7 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
 
     Report {
         version: env!("CARGO_PKG_VERSION"),
-        generated_at: now_unix(),
+        generated_at,
         lookback_seconds,
         focus,
         demo,
@@ -310,7 +311,7 @@ fn adjacent_events(events: &[Event], before: EventKind, after: EventKind, max_de
     None
 }
 
-fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
+fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>, generated_at: u64) {
     if !snapshot.failed_units.is_empty() {
         findings.push(Finding {
             id: "FAILED_SYSTEMD_UNITS",
@@ -357,6 +358,16 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 ];
                 let names = event_subjects(events, EventKind::ServiceFailure);
                 if !names.is_empty() { evidence.push(format!("Identified unit(s): {}", names.join(", "))); }
+                if let Some(uptime) = snapshot.uptime_seconds {
+                    let estimated_boot = generated_at.saturating_sub(uptime);
+                    let before_boot = events.iter().filter(|e|
+                        e.kind == EventKind::ServiceFailure && e.timestamp < estimated_boot).count();
+                    if before_boot > 0 {
+                        evidence.push(format!(
+                            "{before_boot} classified entries predate the estimated current boot (based on uptime; system clock changes can affect this)"
+                        ));
+                    }
+                }
                 evidence
             },
             checks: vec![

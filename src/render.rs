@@ -68,10 +68,11 @@ pub fn text(report: &Report) -> String {
     if !report.service_event_windows.is_empty() {
         writeln!(out, "HISTORICAL SERVICE MESSAGE WINDOWS (not independent failed-service counts)").unwrap();
         for (i, group) in report.service_event_windows.iter().enumerate() {
-            writeln!(out, "  {}. {} – {} | {} classified entries; {} unattributed; unit(s): {}",
+            writeln!(out, "  {}. {} – {} | {} classified entries; {} unattributed; unit(s): {}; boot: {}",
                 i + 1, utc_timestamp(group.start), utc_timestamp(group.end),
                 group.entry_count, group.unattributed_entries,
-                if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") }).unwrap();
+                if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") },
+                boot_relation(report, group.start, group.end)).unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -112,6 +113,17 @@ pub fn text(report: &Report) -> String {
     writeln!(out, "PRIVACY: no raw journal messages are included in this report.").unwrap();
     writeln!(out, "CAUTION: findings are observations and hypotheses, not verified root causes.").unwrap();
     out
+}
+
+/// Approximate relation of a journal window to this host's current boot.
+/// Derived from wall clock minus uptime, not a journal boot ID; clock changes
+/// can make this estimate inaccurate.
+fn boot_relation(report: &Report, start: u64, end: u64) -> &'static str {
+    let Some(uptime) = report.snapshot.uptime_seconds else { return "unknown"; };
+    let cutoff = report.generated_at.saturating_sub(uptime);
+    if end < cutoff { "before_current_boot_estimate" }
+    else if start >= cutoff { "since_current_boot_estimate" }
+    else { "spans_boot_estimate" }
 }
 
 fn state(v: Option<bool>) -> &'static str {
@@ -258,6 +270,7 @@ pub fn json(report: &Report) -> String {
             ("start", js(utc_timestamp(group.start))),
             ("end", js(utc_timestamp(group.end))),
             ("entry_count", n(group.entry_count as u64)),
+            ("boot_relation", js(boot_relation(report, group.start, group.end))),
             ("unattributed_entries", n(group.unattributed_entries as u64)),
             ("units", arr(group.units.iter().cloned().map(js).collect())),
             ("status", js("historical journal message cluster, not independent failed service")),
@@ -369,10 +382,11 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
     if !report.service_event_windows.is_empty() {
         out.push_str("<h2>Historical service message windows</h2><p class=\"muted\">Time clusters, not independent failed services or proof of a current outage.</p>");
         for group in &report.service_event_windows {
-            write!(out, "<article class=\"card\"><h3>{} – {}</h3><p>{} classified entries; {} without unit attribution.</p><p>Unit(s): {}</p></article>",
+            write!(out, "<article class=\"card\"><h3>{} – {}</h3><p>{} classified entries; {} without unit attribution.</p><p>Unit(s): {}</p><p>Boot relation (approximate): {}</p></article>",
                 utc_timestamp(group.start), utc_timestamp(group.end),
                 group.entry_count, group.unattributed_entries,
-                html_escape(&if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") })).unwrap();
+                html_escape(&if group.units.is_empty() { "unknown".to_string() } else { group.units.join(", ") }),
+                boot_relation(report, group.start, group.end)).unwrap();
         }
     }
     if !report.network_incidents.is_empty() {
@@ -426,6 +440,18 @@ mod tests {
         let page = html(&report);
         assert!(page.contains("<!doctype html>"));
         assert!(page.contains("DEMO DATA"));
+    }
+
+    #[test]
+    fn service_windows_are_labeled_relative_to_estimated_boot() {
+        let mut report = engine::analyze(demo::snapshot(), 3_600, Focus::All, true);
+        report.snapshot.uptime_seconds = Some(94);
+        let now = report.generated_at;
+        assert_eq!(boot_relation(&report, now - 1000, now - 990), "before_current_boot_estimate");
+        assert_eq!(boot_relation(&report, now - 30, now - 20), "since_current_boot_estimate");
+        assert_eq!(boot_relation(&report, now - 110, now - 70), "spans_boot_estimate");
+        report.snapshot.uptime_seconds = None;
+        assert_eq!(boot_relation(&report, now - 1000, now - 990), "unknown");
     }
 
     #[test]
