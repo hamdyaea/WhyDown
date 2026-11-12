@@ -285,3 +285,12 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - The installer and `--dry-run` do not install distribution packages, prompt for sudo, run a GUI, require a display, or make network checks for Tkinter.
 - Dedicated shell smoke tests isolate `PATH` and simulate (1) absent Python, (2) a Python executable with unsuccessful Tkinter import, (3) successful Tkinter import, (4) safe CLI and desktop dry-run paths. The smoke suite runs in both Rust CI and release workflows.
 - This checks module importability only; actual window availability on X11/XWayland and live GUI behavior on Manjaro still require separate desktop validation.
+ 
+## v0.9.2 graphical copy-selection test coverage
+
+- Real Tk window is created in a virtual X11 environment (Xvfb) and populated by a fictional Rust demo diagnostic, not live host evidence.
+- Copying an explicitly highlighted substring in the **Findings & evidence** pane stores exactly those characters in the local clipboard, rather than the full report; status text confirms the copy.
+- Keyboard handlers `Ctrl+C` / `Ctrl+Insert`, `Ctrl+A` select-all and a right-click context menu are bound to the existing read-only text widgets. Setting `exportselection=False` keeps manual selections available when focus moves to the Copy selection button.
+- Coverage pane permits substring copying, while selected timeline/finding rows produce only their tab-separated data.
+- Empty text selections do not copy the full report. Clipboard updates occur only on explicit user action; no external transfer or file output.
+- Automated Tk/Xvfb coverage does not prove clipboard-manager integration across all Manjaro/X11/XWayland compositors. On-host manual validation remains pending.
