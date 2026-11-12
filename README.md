@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.3.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.3.1 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -17,6 +17,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Source attribution (v0.3.0):** bounded program, interface or systemd unit identifiers from journal messages; no raw log bodies are retained.
 - **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
 - **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
+- **Service diagnostics (v0.3.1):** separate system/user systemd failed-unit snapshots, plus historical service-message windows that distinguish log entries from independent failures.
 - **Optional disk breakdown:** `--disk-details` uses `du` to list large subdirectories on up to two near-full non-root filesystems. No files are removed.
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
 - **Three output formats:** human-readable terminal output, machine-readable JSON, self-contained HTML.
@@ -44,7 +45,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.3.0
+VERSION=v0.3.1
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -97,7 +98,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.3.0
+./target/release/whydown --version   # expects whydown 0.3.1
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -165,7 +166,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.3.0 [DEMO]
+WhyDown 0.3.1 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -206,7 +207,8 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Network incident windows | Classified network journal events | Groups events separated by at most 120 seconds for the same identified interface; no claim of active outages |
 | Current interface state | `/sys/class/net/*/operstate` | Read-only kernel state; no internet connectivity check |
 | Event attribution | Bounded `journalctl` identifiers | Optional interface, systemd unit and program names; raw messages discarded |
-| Failed services | `systemctl list-units --failed` | Lists failed service/unit identifiers |
+| Failed services | `systemctl list-units --failed`, `systemctl --user list-units --failed` | Separately checks system and invoking-user managers; unavailable checks are marked unknown, not zero |
+| Historical service messages | Classified `journalctl` entries | Groups messages within five seconds into time windows; not a count of independently failed services |
 | Service journal events | `journalctl` | Classifies failure-like system messages |
 | Disk utilization | `df -PT` | Warns at >=90% for writable-capable filesystem types; excludes full-by-design compressed read-only images (SquashFS, EROFS, ISO 9660, CramFS) |
 | Optional disk details | `du -x -k --max-depth=2` | Read-only breakdown for up to two eligible near-full non-root mounts; may be slow or incomplete |
@@ -224,14 +226,14 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.2.2; the v0.3.0 retest and testing on the other five environments remain planned.** See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.0; a live v0.3.1 retest and testing on the other five environments remain planned.** See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**Breaking schema change:** `schema_version` is now `2`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.3.1 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Security and privacy
 
@@ -280,10 +282,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.2.1 (released):** stop mistaking the normal NetworkManager DHCP transaction timeout budget for a DHCP failure.
 - **v0.2.2 (released):** require network interface or component context for generic "link down" messages, avoiding SATA-storage false positives at boot.
 - **v0.3.0 (released):** per-interface incident grouping, bounded event attribution, current-versus-historical output, JSON schema v2.
+- **v0.3.1 (released):** system and user systemd failed-unit snapshots; temporal service-message groups without assuming one message equals one service outage.
 - **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.3.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.3.1: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
