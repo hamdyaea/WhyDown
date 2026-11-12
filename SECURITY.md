@@ -20,3 +20,12 @@ Do not post sensitive system logs, credentials, exploitable proof-of-concept pay
 - HTML output escapes dynamic content to prevent embedded scripting
 
 This software is **not** intended to defend a compromised host or to serve as a trusted forensic record.
+
+
+## v0.4.0 collection and report safety
+
+Subprocess data collection is bounded by elapsed time and stdout volume to avoid indefinite hangs or unbounded output retention. A failed collector is reported as a limitation; no incomplete capture should be interpreted as a clean check. The optional disk breakdown can still cause disk I/O until its timeout.
+
+Unix report files use permission mode `0600`. `--overwrite` stages, synchronizes and atomically renames a replacement, preserving previous content when staging/writing fails. Exported data may reveal local package names, interface labels, service names or filesystem paths; review before distributing.
+
+`--exit-on-warning` is opt-in and reports findings, not verified root causes. Never use it as a substitute for authoritative host monitoring.
