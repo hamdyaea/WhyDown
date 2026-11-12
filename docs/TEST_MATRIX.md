@@ -294,3 +294,13 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - Coverage pane permits substring copying, while selected timeline/finding rows produce only their tab-separated data.
 - Empty text selections do not copy the full report. Clipboard updates occur only on explicit user action; no external transfer or file output.
 - Automated Tk/Xvfb coverage does not prove clipboard-manager integration across all Manjaro/X11/XWayland compositors. On-host manual validation remains pending.
+
+## v0.10.0 Qt 6 native GUI (2026-11-12)
+
+- Replace Tkinter with optional PyQt6; the normal Rust CLI/TUI have no Python or Qt dependency. The Rust GUI launcher embeds its Python source in the same Linux executables.
+- CI installs `python3-pyqt6` and Xvfb only on Linux runners, and starts an actual Qt 6 window with the binary in fictional demo mode to avoid collecting real host evidence.
+- Automated GUI verification asserts that evidence uses an *enabled*, read-only `QPlainTextEdit`, accepts native mouse text selection (QTest double-click), puts exactly the selected passage in the system clipboard via the toolbar and `Ctrl+C`, and refuses to copy anything when selection is empty.
+- Coverage text is independently selectable and copyable; timeline supports selected row copying. The display is styled with Qt style sheets, a sidebar and diagnostic cards.
+- Installer preflight checks `python3 -c 'from PyQt6.QtWidgets import QApplication'`; unavailable optional packages do not block installation of CLI/TUI. Test stubs simulate absent Python, absent Qt and working Qt.
+- JSON schema v2, collector rule behavior, shell-free subprocess launch, 8 MiB output cap, 240-second timeout and opt-in private file writes remain unchanged.
+- Actual compositor/native clipboard-manager verification on Manjaro and Debian has **not** been performed; Xvfb is a virtual X server.
