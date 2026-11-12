@@ -322,6 +322,46 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn next_menu_number_after_diagnostic_is_not_consumed() {
+        // Previous v0.8.0 behavior silently consumed 6 at the diagnostic pause.
+        let mut input = Cursor::new(b"1\n6\n1\n\n0\n".as_slice());
+        let mut output = Vec::new();
+        let cli = Cli { tui_demo: true, ..Cli::default() };
+        run_with_io(&mut input, &mut output, cli, false).unwrap();
+        let transcript = String::from_utf8(output).unwrap();
+        assert!(transcript.contains("Diagnostic completed"));
+        assert!(transcript.contains("Finding number"));
+        assert!(transcript.contains("Finding evidence"));
+        assert!(transcript.contains("Selection (number + Enter)"));
+    }
+
+    #[test]
+    fn submenu_continue_number_is_forwarded_to_dashboard() {
+        let mut input = Cursor::new(b"1\n6\n1\n7\n\n0\n".as_slice());
+        let mut output = Vec::new();
+        let cli = Cli { tui_demo: true, ..Cli::default() };
+        run_with_io(&mut input, &mut output, cli, false).unwrap();
+        let transcript = String::from_utf8(output).unwrap();
+        assert!(transcript.contains("Finding evidence"));
+        assert!(transcript.contains("Recent classified events"),
+            "7 typed at the evidence-continue prompt should open the timeline");
+    }
+
+    #[test]
+    fn settings_changes_show_explicit_status_and_clear_stale_snapshot() {
+        let mut input = Cursor::new(b"1\n2\n3\n4\n5\n0\n".as_slice());
+        let mut output = Vec::new();
+        let cli = Cli { tui_demo: true, ..Cli::default() };
+        run_with_io(&mut input, &mut output, cli, false).unwrap();
+        let transcript = String::from_utf8(output).unwrap();
+        for expected in ["Focus changed to network", "Lookback changed to 1h",
+            "Current boot filter enabled", "Journal cap changed to 10000",
+            "No report for these settings yet"] {
+            assert!(transcript.contains(expected), "Missing status: {expected}");
+        }
+    }
+
+    #[test]
     fn demo_menu_is_interactive_without_host_collection() {
         // Run, choose finding 1, inspect timeline, coverage, export hint and quit.
         let mut input = Cursor::new(b"1\n\n6\n1\n\n7\n\n8\n\n9\n\n0\n".as_slice());
