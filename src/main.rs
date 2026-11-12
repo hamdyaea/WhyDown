@@ -1,21 +1,24 @@
-use std::fs::OpenOptions;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+use std::path::Path;
+use std::process;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use whydown::cli::{Cli, Command, OutputFormat, HELP};
+use whydown::model::Severity;
 use whydown::{analyze, collect, demo, render, time};
 
-fn run() -> Result<(), String> {
+fn run() -> Result<u8, String> {
     let cli = Cli::parse(std::env::args().skip(1)).map_err(|e| format!("{e}\nRun `whydown --help` for usage."))?;
 
     match cli.command {
         Command::Help => {
             print!("{HELP}");
-            return Ok(());
+            return Ok(0);
         }
         Command::Version => {
             println!("whydown {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
+            return Ok(0);
         }
         _ => {}
     }
@@ -26,7 +29,8 @@ fn run() -> Result<(), String> {
 
     let mut snapshot = match cli.command {
         Command::Demo => demo::snapshot(),
-        _ => collect::collect(cli.focus, time::now_unix().saturating_sub(cli.since_seconds), cli.max_events, cli.disk_details),
+        _ => collect::collect(cli.focus, time::now_unix().saturating_sub(cli.since_seconds),
+            cli.max_events, cli.disk_details, cli.current_boot),
     };
     if cli.command == Command::Demo {
         let since_unix = time::now_unix().saturating_sub(cli.since_seconds);
@@ -39,30 +43,82 @@ fn run() -> Result<(), String> {
         OutputFormat::Html => render::html(&report),
     };
 
+    let should_fail = cli.exit_on_warning &&
+        report.findings.iter().any(|f| f.severity == Severity::Warning);
     match cli.output {
         Some(path) if path.to_string_lossy() != "-" => {
-            let mut options = OpenOptions::new();
-            options.write(true);
-            if cli.overwrite { options.create(true).truncate(true); }
-            else { options.create_new(true); }
-            #[cfg(unix)]
-            options.mode(0o600);
-            let mut file = options.open(&path)
-                .map_err(|e| format!("Cannot open {}: {e} (use --overwrite to replace an existing file)", path.display()))?;
-            file.write_all(output.as_bytes()).map_err(|e| format!("Cannot write {}: {e}", path.display()))?;
+            save_report(&path, output.as_bytes(), cli.overwrite)?;
             eprintln!("Report saved to {}", path.display());
         }
         _ => {
             let mut stdout = io::stdout().lock();
-            stdout.write_all(output.as_bytes()).map_err(|e| format!("Cannot write to stdout: {e}"))?;
+            stdout.write_all(output.as_bytes())
+                .map_err(|e| format!("Cannot write to stdout: {e}"))?;
         }
+    }
+    Ok(if should_fail { 1 } else { 0 })
+}
+
+/// Reports may contain local configuration: create mode 0600 files.
+/// With --overwrite, stage and sync in the destination directory before
+/// atomically replacing the old report. A failed write preserves the old file.
+fn save_report(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(), String> {
+    if !overwrite {
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(path).map_err(|e| format!(
+            "Cannot create {}: {e} (use --overwrite to replace an existing file)",
+            path.display()
+        ))?;
+        let result = file.write_all(bytes).and_then(|_| file.sync_all());
+        if let Err(error) = result {
+            drop(file);
+            let _ = fs::remove_file(path);
+            return Err(format!("Cannot write {}: {error}", path.display()));
+        }
+        return Ok(());
+    }
+
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut staged: Option<(std::path::PathBuf, File)> = None;
+    for index in 0..32 {
+        let candidate = parent.join(format!(".whydown-report-{}-{index}.tmp", process::id()));
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        match opts.open(&candidate) {
+            Ok(file) => { staged = Some((candidate, file)); break; }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("Cannot stage {}: {error}", path.display())),
+        }
+    }
+    let (temp_path, mut file) = staged.ok_or_else(||
+        "Cannot find a free temporary report filename".to_string())?;
+    let result = (|| -> io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("Cannot replace {}: {error}; previous report preserved", path.display()));
     }
     Ok(())
 }
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("Error: {error}");
-        std::process::exit(2);
+    match run() {
+        Ok(0) => {}
+        Ok(code) => process::exit(code as i32),
+        Err(error) => {
+            eprintln!("Error: {error}");
+            process::exit(2);
+        }
     }
 }

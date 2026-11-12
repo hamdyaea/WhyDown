@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.3.6 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.4.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -23,6 +23,9 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Optional disk breakdown:** `--disk-details` uses `du` to list large subdirectories on up to two near-full non-root filesystems. No files are removed.
 - **Privacy-aware reports:** stores *classified event types and timestamps*, not raw journal message bodies. Reports can still contain local mountpoints, network interface and systemd unit names.
 - **Three output formats:** human-readable terminal output, machine-readable JSON, self-contained HTML.
+- **Bounded collectors (v0.4.0):** subprocesses run with timeouts and caps on stdout size; a failed or oversized query is reported as a collection limitation, not silently treated as a healthy subsystem.
+- **Boot-scoped investigation (v0.4.0):** `--current-boot` uses `journalctl --boot=0` so old journal errors need not pollute the present-boot report. Current systemd/dpkg snapshots are still checked independently of journal scope.
+- **Monitoring and safe reports (v0.4.0):** `--exit-on-warning` returns code 1 only when a warning is found; by default findings do not change exit status. Exports use private permissions (0600 on Unix); `--overwrite` stages and atomically replaces existing files.
 - **Demo mode:** show a fictional incident without reading any local system information.
 - **Linux x86_64 / ARM64:** GNU/glibc and musl release archives, plus a guided non-root binary installer that does not need Rust or Cargo. Linux distributions still require real-world testing.
 
@@ -40,7 +43,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.3.6/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.4.0/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -102,7 +105,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.3.6
+VERSION=v0.4.0
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -182,7 +185,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.3.6
+./target/release/whydown --version   # expects whydown 0.4.0
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -206,6 +209,8 @@ whydown demo [OPTIONS]
 --focus VALUE     all | network | services | system     (default: all)
 --since VALUE     e.g. 30m, 24h, 7d                (default: 24h)
 --max-events N    newest journal lines read         (default: 500)
+--current-boot    restrict journal evidence to the current boot
+--exit-on-warning return exit code 1 when a warning is found (opt-in)
 --disk-details    inspect directories on near-full filesystems (optional; can take time)
 --format VALUE    text | json | html                (default: text)
 --output FILE     save to a new file
@@ -225,6 +230,12 @@ whydown diagnose --focus network --since 3h
 
 # Services and related journal messages
 whydown diagnose --focus services --since 7d
+
+# Ignore events from previous Linux boots when investigating a startup
+whydown diagnose --focus services --since 24h --current-boot
+
+# Use in monitoring/cron/CI; exit 1 for warnings, 2 for invocation/output errors
+whydown diagnose --focus all --exit-on-warning --format json --output report.json
 
 # Disk usage, OOM and storage errors
 whydown diagnose --focus system
@@ -250,7 +261,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.3.6 [DEMO]
+WhyDown 0.4.0 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -301,7 +312,7 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |
 
-### Debian / Ubuntu package-manager diagnostics (v0.3.6)
+### Debian / Ubuntu package-manager diagnostics (introduced in v0.3.6)
 
 On dpkg-managed systems, `--focus system` and `--focus all` now check the package database with a read-only `dpkg-query` call. Broken/incomplete states appear as `DPKG_INCOMPLETE_PACKAGES` (current snapshot) with affected package names and states. A successful systemd check does **not** imply healthy packages.
 
@@ -332,7 +343,25 @@ whydown diagnose --since 24h --max-events 5000 --format json --output report.jso
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.3.6 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.4.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+
+## Reliable automation and bounded collection (v0.4.0)
+
+`whydown diagnose` is a **snapshot**, not an ongoing health agent. By default, exit code **0** means the diagnostic command executed and produced a report; it does not imply the system is healthy. For scripts, opt in to warning-dependent status:
+
+```bash
+whydown diagnose --focus system --exit-on-warning
+status=$?
+# 0 = no WARNING findings; 1 = one or more WARNING findings;
+# 2 = invalid invocation or report output failure.
+printf 'WhyDown exit status: %s\n' "$status"
+```
+
+`--current-boot` limits journal collection to the active boot through `journalctl --boot=0` in addition to `--since`. This avoids mixing previous-boot journal events into a targeted investigation. It does **not** restrict current systemd/dpkg/disk/network snapshots. The report explicitly states the journal scope, and JSON schema v2 includes `journal_current_boot_only` (additive, no schema bump). A historical boot estimate remains a heuristic when current-boot filtering is not requested.
+
+To prevent indefinite hangs or unbounded memory, WhyDown enforces a **20-second timeout** on normal subprocess collectors, **45 seconds on journalctl** and **120 seconds on optional `du` disk breakdowns**, with an output cap of **16 MiB** (32 MiB for journalctl). Incomplete/oversized or timed-out results are reported as collection limitations rather than silently used as complete evidence. Under `--disk-details`, directory traversal may still cause substantial disk I/O until its timeout.
+
+Reports may expose unit names, mountpoints and other local data. On Unix, files written with `--output` are mode `0600`. Without `--overwrite`, an existing output file is never overwritten. With `--overwrite`, WhyDown writes and syncs a temporary private file in the destination directory before an atomic rename so an interrupted write does not destroy the existing report. Review exports before sharing.
 
 ## Security and privacy
 
@@ -387,10 +416,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.3.4 (released):** guided Linux x86_64/ARM64 installer with automatic ABI detection, SHA-256 verification, and optional source build/preflight help; Raspberry Pi OS guidance.
 - **v0.3.5 (released):** static musl by default, candidate compatibility checks before installing, and preservation of previous executables when installation fails.
 - **v0.3.6 (released):** detect incomplete Debian dpkg package states in system/all diagnostics, show safe investigation commands, and include findings in JSON/HTML reports.
-- **v0.4 (planned):** optional terminal UI, broader real-world distribution fixtures, safe evidence bundles and configurable diagnostic rules.
+- **v0.4.0 (released):** bounded and timed subprocess collection, optional current-boot-only journal analysis, monitoring exit codes, safer atomic private report replacement and associated tests.
+- **v0.5 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.3.6: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.4.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 

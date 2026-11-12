@@ -42,6 +42,48 @@ fn json_output_has_schema_fields() {
 }
 
 #[test]
+fn warning_exit_code_is_opt_in_and_json_output_is_preserved() {
+    let normal = whydown(&["demo", "--format", "json"]);
+    assert_eq!(normal.status.code(), Some(0));
+    let monitored = whydown(&["demo", "--format", "json", "--exit-on-warning"]);
+    assert_eq!(monitored.status.code(), Some(1));
+    let json = String::from_utf8(monitored.stdout).unwrap();
+    assert!(json.contains("\"schema_version\": 2"));
+    assert!(json.contains("\"warning_count\""));
+    assert!(json.contains("\"DPKG_INCOMPLETE_PACKAGES\""));
+}
+
+#[test]
+fn current_boot_scope_is_machine_readable() {
+    let result = whydown(&["diagnose", "--focus", "services", "--current-boot", "--format", "json"]);
+    assert_eq!(result.status.code(), Some(0));
+    let json = String::from_utf8(result.stdout).unwrap();
+    assert!(json.contains("\"journal_current_boot_only\": true"));
+    assert!(json.contains("\"schema_version\": 2"));
+}
+
+#[test]
+fn overwriting_report_replaces_it_and_keeps_private_permissions() {
+    let path = std::env::temp_dir().join(format!(
+        "whydown-test-{}-atomic.json", std::process::id()
+    ));
+    fs::write(&path, "old report").unwrap();
+    let result = whydown(&["demo", "--format", "json",
+        "--output", path.to_str().unwrap(), "--overwrite"]);
+    assert!(result.status.success());
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("\"schema_version\": 2"));
+    assert_ne!(saved, "old report");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn rejects_unknown_arguments() {
     let result = whydown(&["diagnose", "--since", "100d"]);
     assert!(!result.status.success());

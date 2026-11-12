@@ -13,8 +13,10 @@ pub fn text(report: &Report) -> String {
     writeln!(out, "System    : {}", report.snapshot.os).unwrap();
     writeln!(out, "Kernel    : {}", report.snapshot.kernel).unwrap();
     writeln!(out, "Focus     : {}", report.focus).unwrap();
-    writeln!(out, "Journal    : last {} {}, newest entries only",
-        report.lookback_seconds / 60, count_word((report.lookback_seconds / 60) as usize, "minute", "minutes")).unwrap();
+    writeln!(out, "Journal   : last {} {}, newest entries only{}",
+        report.lookback_seconds / 60,
+        count_word((report.lookback_seconds / 60) as usize, "minute", "minutes"),
+        if report.snapshot.journal_current_boot_only { " (current boot only)" } else { "" }).unwrap();
     writeln!(out, "Findings  : {}", report.findings.len()).unwrap();
     writeln!(out).unwrap();
 
@@ -246,6 +248,7 @@ pub fn json(report: &Report) -> String {
         ("version", js(report.version)),
         ("generated_at", js(utc_timestamp(report.generated_at))),
         ("lookback_seconds", n(report.lookback_seconds)),
+        ("journal_current_boot_only", JsonValue::Bool(s.journal_current_boot_only)),
         ("focus", js(report.focus.as_str())),
         ("demo", JsonValue::Bool(report.demo)),
         ("summary", object(vec![
@@ -376,6 +379,7 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         ("Kernel", report.snapshot.kernel.as_str()),
         ("Generated", &utc_timestamp(report.generated_at)),
         ("Focus", report.focus.as_str()),
+        ("Journal", if report.snapshot.journal_current_boot_only { "current boot only" } else { "all accessible boots" }),
     ];
     out.push_str("<div class=\"meta\">");
     for (label, value) in data {
@@ -475,6 +479,15 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn current_boot_scope_is_visible_across_report_formats() {
+        let mut report = engine::analyze(demo::snapshot(), 3_600, Focus::All, true);
+        report.snapshot.journal_current_boot_only = true;
+        assert!(text(&report).contains("current boot only"));
+        assert!(json(&report).contains("\"journal_current_boot_only\": true"));
+        assert!(html(&report).contains("current boot only"));
+    }
 
     #[test]
     fn render_different_formats() {

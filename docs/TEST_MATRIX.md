@@ -86,3 +86,12 @@ WhyDown v0.3.6 was manually run as the normal user `hamdy` in the Debian GNU/Lin
 - `linux-image-amd64`: `unpacked`
 
 The finding was `DPKG_INCOMPLETE_PACKAGES`, severity `WARN`, scope `current_snapshot`, and the count was exactly **4**, consistent with an earlier `dpkg --audit` inspection. Both system and user systemd managers reported **0 failed units**. These observations validate the new rule on a real broken dpkg state; they do **not** establish why the package configuration failed, that system health is otherwise verified, or that a repair succeeded. The session did not run repair commands. JSON/HTML reports have not yet been manually verified on this VM.
+
+
+## v0.4.0 release validation checklist
+
+- Test `--current-boot --since 24h` on systems with multiple boots; compare visible journal timestamps with `journalctl --boot=0`. The JSON field `journal_current_boot_only` should be true.
+- Test `--exit-on-warning` on synthetic demo data: exit code 1 with warnings and a valid report, while the default command still returns 0. Invalid arguments/output errors use code 2.
+- Test report overwrite: existing file is protected by default; explicit `--overwrite` replaces a report using private 0600 permissions and atomic rename.
+- Test bounded child output and timeout with synthetic commands. Limitations should identify failed collection instead of claiming a clean system.
+- Do not claim new manual Raspberry Pi OS, Debian, Manjaro or VM validation until v0.4.0 is actually executed on the respective host. These additions are subject to GitHub Actions tests only at publication time.

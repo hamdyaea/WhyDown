@@ -25,3 +25,10 @@ For bug reports, include OS, kernel, expected result, observed result, exact CLI
 ## License
 
 Contributions are provided under GPL-3.0-only. By submitting a contribution you represent that you have the rights necessary to license it under this license.
+
+
+## v0.4.0 regression expectations
+
+Use `cargo test --all-targets` and `cargo clippy --all-targets`. New collectors must be read-only, bounded in time/memory and represent missing/incomplete access as a collection limitation. Any journal-scope change must be reflected in text, HTML and schema-v2 JSON outputs and covered by unit or integration tests.
+
+Report output must preserve existing files unless `--overwrite` is explicit, and private data must not be written with world-readable permissions on Unix. CLI warning exit behavior is opt-in; existing successful invocations must remain backward-compatible.

@@ -3,9 +3,12 @@
 use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
 use std::collections::HashSet;
 use std::fs;
-use std::process::Command;
+use std::io::{self, Read};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
-pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: bool) -> Snapshot {
+pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: bool, current_boot: bool) -> Snapshot {
     let mut snapshot = Snapshot {
         os: read_os_name().unwrap_or_else(|| "Unknown Linux".into()),
         kernel: read_trimmed("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Unknown".into()),
@@ -14,6 +17,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
             .and_then(|v| v.split_whitespace().next()?.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v >= 0.0)
             .map(|v| v as u64),
+        journal_current_boot_only: current_boot,
         ..Snapshot::default()
     };
 
@@ -119,7 +123,10 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
 
     let since_arg = format!("--since=@{since_unix}");
     let count_arg = format!("--lines={max_events}");
-    let journal_args = ["--no-pager", "--output=short-unix", since_arg.as_str(), count_arg.as_str()];
+    let mut journal_args = vec!["--no-pager", "--output=short-unix"];
+    if current_boot { journal_args.push("--boot=0"); }
+    journal_args.push(since_arg.as_str());
+    journal_args.push(count_arg.as_str());
     match run_capture("journalctl", &journal_args) {
         Ok((true, output)) => {
             let lines: Vec<&str> = output.lines().collect();
@@ -135,9 +142,11 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
             snapshot.events = parse_journal(&output);
         }
         Ok((false, _)) => snapshot.notes.push(
-            "Journal collection failed or access is restricted; try adding your user to the systemd-journal group (log out/in afterwards)".into(),
+            "Journal collection failed or access is restricted; verify journalctl permissions and available boots".into(),
         ),
-        Err(_) => snapshot.notes.push("journalctl is unavailable; event analysis skipped".into()),
+        Err(error) => snapshot.notes.push(format!(
+            "Journal not collected (missing command, timeout, oversized output or I/O error): {error}"
+        )),
     }
 
     snapshot
@@ -166,10 +175,74 @@ fn unquote_os_release(value: &str) -> String {
     }
 }
 
-fn run_capture(command: &str, args: &[&str]) -> Result<(bool, String), std::io::Error> {
-    // Fixed executables and positional arguments only; never a shell.
-    let result = Command::new(command).args(args).output()?;
-    Ok((result.status.success(), String::from_utf8_lossy(&result.stdout).into_owned()))
+/// Bounded external collection: individual commands are never allowed to
+/// block a diagnosis indefinitely or retain unlimited stdout in memory.
+/// No shell, privilege escalation, network probes or data mutation.
+fn run_capture(command: &str, args: &[&str]) -> io::Result<(bool, String)> {
+    let seconds = if command == "du" { 120 } else if command == "journalctl" { 45 } else { 20 };
+    let max_bytes = if command == "journalctl" { 32 * 1024 * 1024 } else { 16 * 1024 * 1024 };
+    run_capture_with_limits(command, args, Duration::from_secs(seconds), max_bytes)
+}
+
+fn run_capture_with_limits(
+    command: &str, args: &[&str], timeout: Duration, max_bytes: usize,
+) -> io::Result<(bool, String)> {
+    let mut child = Command::new(command)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "Collector stdout pipe not available")
+    })?;
+    // Drain stdout concurrently while the process runs, avoiding OS pipe
+    // deadlocks. Keep at most max_bytes; the reader closes the pipe on overflow.
+    let reader = thread::spawn(move || -> io::Result<(Vec<u8>, bool)> {
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            let n = stdout.read(&mut buffer)?;
+            if n == 0 { break; }
+            let left = max_bytes.saturating_sub(bytes.len());
+            if n > left {
+                bytes.extend_from_slice(&buffer[..left]);
+                return Ok((bytes, true));
+            }
+            bytes.extend_from_slice(&buffer[..n]);
+        }
+        Ok((bytes, false))
+    });
+
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return Err(io::Error::new(io::ErrorKind::TimedOut,
+                    format!("{command} exceeded collection timeout")));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return Err(error);
+            }
+        }
+    };
+    let (bytes, truncated) = reader.join().map_err(|_| {
+        io::Error::new(io::ErrorKind::Other, "Collector output reader panicked")
+    })??;
+    if truncated {
+        return Err(io::Error::new(io::ErrorKind::InvalidData,
+            format!("{command} output exceeded bounded collection limit")));
+    }
+    Ok((status.success(), String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 pub fn parse_ipv4_default_route(content: &str) -> bool {
@@ -578,6 +651,21 @@ trigger-await\tiW \n";
     fn dpkg_query_ignores_invalid_or_inapplicable_states() {
         let text = "pkg\tii \nremoved\trc \nnotinstalled\tun \nunknown\t?? \nnot-a-record\n";
         assert!(parse_dpkg_status(text).is_empty());
+    }
+
+    #[test]
+    fn collector_limits_subprocess_runtime_and_output() {
+        // External commands are used solely as synthetic test fixtures.
+        let timeout = run_capture_with_limits("sleep", &["2"],
+            Duration::from_millis(70), 1024).unwrap_err();
+        assert_eq!(timeout.kind(), io::ErrorKind::TimedOut);
+        let output = run_capture_with_limits("printf", &["123456789"],
+            Duration::from_secs(2), 4).unwrap_err();
+        assert_eq!(output.kind(), io::ErrorKind::InvalidData);
+        let success = run_capture_with_limits("printf", &["OK"],
+            Duration::from_secs(2), 10).unwrap();
+        assert!(success.0);
+        assert_eq!(success.1, "OK");
     }
 
     #[test]
