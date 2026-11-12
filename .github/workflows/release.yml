@@ -54,7 +54,7 @@ jobs:
       - name: Interactive TUI pseudo-terminal smoke test
         run: python3 tests/tui_pty_smoke.py ./target/release/whydown
       - name: GUI model tests (no display needed)
-        run: python3 -m unittest discover -s tests -p 'test_gui.py' -v
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Qt6 desktop GUI mouse-selection smoke test on Xvfb
         run: |
           sudo apt-get update
