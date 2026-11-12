@@ -208,3 +208,14 @@ User-provided terminal transcript confirms a successful `git pull --ff-only` to 
 - Network incident grouping reported one historical link incident and no spurious zero-count association-only incidents.
 
 **Validated:** installer, JSON report, journal completeness, observed findings/correlations, sampled interface deltas. **Still pending:** post-fix live host rerun, formal manual HTML review, independent cause attribution for USB or LightDM, and broader distribution/platform testing. Avoid publishing raw journal identifiers or site-specific details from private logs.
+
+## Additional real kernel/systemd journal validation — 2026-11-12
+
+User-supplied `journalctl -b -k` and `systemctl show` output supports the following, without proving root cause:
+
+- At 16:01:24 CET, USB paths `1-5` and `1-5.1` detached. At 16:01:42–16:01:43 CET, another group of USB paths under `1-1` detached; nearby `r8152` reported interrupt submission status `-71`, and `evdi` reported two DisplayLink card detachments. This is consistent with a possible hub/dock disconnection or reset, not definitive proof of its power state or cause.
+- At 16:02:07 CET, `wlan0` reported `PREV_AUTH_NOT_VALID`. It authenticated and associated at 16:02:25 CET (18 seconds later) with a different access-point identifier; this does not by itself prove usable network connectivity. At 16:03:19 CET, local-choice deauthentication and successful association to another access point were printed in order by the original kernel journal within one second; after WhyDown strips fractional timestamps and sorts classified events, it must **not** claim within-second order.
+- UFW `BLOCK` entries in the same window include local discovery traffic. They do not establish a DNS or Internet outage and should not be classified as failures purely because `BLOCK` appears.
+- LightDM started at 15:15:57 CET, its main process exited with code 1 at 15:16:01 CET, and systemd scheduled and started a restart at 15:16:01 CET. The greeter session opened at 15:16:03 CET and the user's session at 15:16:10 CET. A separate later **current** query returned `ActiveState=active`, `SubState=running`, `Result=success`, `NRestarts=1`. Thus, systemd service operation is verified at the time of that snapshot, although the underlying cause of the initial crash and full application readiness remain unproven.
+
+The targeted current unit state collector added after these logs is not yet manually tested with this release; these observations come from manual `systemctl show`, not WhyDown's automated new collector. This distinction must remain in release notes until tested on the host.
