@@ -43,8 +43,8 @@ impl Finding {
             | "PACMAN_DATABASE_CHECK_FAILED" | "LOW_MEMORY_HEADROOM"
             | "MEMORY_STALL_PRESSURE" | "IO_STALL_PRESSURE"
             | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
-            | "MD_RAID_DEGRADED" => "current_snapshot",
-            "NO_CLASSIFIED_ANOMALY" => "unverified",
+            | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY" => "current_snapshot",
+            "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE" => "unverified",
             _ => "historical_journal",
         }
     }
@@ -108,6 +108,7 @@ pub enum EventKind {
     ServiceFailure,
     OutOfMemory,
     StorageError,
+    FileHandleExhaustion,
 }
 
 impl EventKind {
@@ -120,6 +121,7 @@ impl EventKind {
             Self::ServiceFailure => "service_failure",
             Self::OutOfMemory => "out_of_memory",
             Self::StorageError => "storage_error",
+            Self::FileHandleExhaustion => "file_handle_exhaustion",
         }
     }
 
@@ -132,6 +134,7 @@ impl EventKind {
             Self::ServiceFailure => "Service failure reported",
             Self::OutOfMemory => "Out-of-memory event reported",
             Self::StorageError => "Storage error reported",
+            Self::FileHandleExhaustion => "File descriptor exhaustion reported",
         }
     }
 
@@ -141,7 +144,7 @@ impl EventKind {
                 Focus::Network
             }
             Self::ServiceFailure => Focus::Services,
-            Self::OutOfMemory | Self::StorageError => Focus::System,
+            Self::OutOfMemory | Self::StorageError | Self::FileHandleExhaustion => Focus::System,
         }
     }
 }
@@ -309,9 +312,15 @@ pub struct Snapshot {
     pub file_handle_health: Option<FileHandleHealth>,
     pub inode_health: Vec<InodeHealth>,
     pub raid_health: Vec<RaidHealth>,
+    /// Root (/) mount options from /proc/self/mountinfo; None if unverified.
+    pub root_filesystem_read_only: Option<bool>,
+    /// True only when the disk capacity collector returned valid entries.
+    pub disk_usage_checked: bool,
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
+    /// True only when journalctl completed successfully; empty logs may still be valid.
+    pub journal_checked: bool,
     /// True when journalctl was invoked with --boot=0.
     pub journal_current_boot_only: bool,
     pub notes: Vec<String>,
@@ -344,9 +353,12 @@ impl Default for Snapshot {
             file_handle_health: None,
             inode_health: Vec::new(),
             raid_health: Vec::new(),
+            root_filesystem_read_only: None,
+            disk_usage_checked: false,
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
+            journal_checked: false,
             journal_current_boot_only: false,
             notes: Vec::new(),
             collector_timings: Vec::new(),
