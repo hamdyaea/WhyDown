@@ -792,11 +792,16 @@ mod tests {
     fn same_second_wifi_events_do_not_claim_order_or_recovery() {
         // Real journal export retains seconds, not subsecond timing. Even if the
         // source association precedes deauthentication, their timestamps tie.
-        let events = vec![
-            ev(100, EventKind::WifiAssociated, Some("wlan0")),
-            ev(100, EventKind::WifiRoamStart, Some("wlan0")),
-            ev(100, EventKind::LinkDown, Some("wlan0")),
-        ];
+        let events = [
+            EventKind::WifiAssociated,
+            EventKind::WifiRoamStart,
+            EventKind::LinkDown,
+        ].into_iter().map(|kind| Event {
+            timestamp: 100,
+            kind,
+            subject: Some("wlan0".into()),
+            source: Some("kernel".into()),
+        }).collect();
         let report = analyze(Snapshot { events, ..Snapshot::default() },
             3600, Focus::Network, false);
         let roam = report.findings.iter().find(|f|
