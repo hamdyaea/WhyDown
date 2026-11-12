@@ -11,7 +11,7 @@ All notable changes to WhyDown will be documented here.
 
 ### Tests and documentation
 - Offline installer tests cover default musl target, GNU override, successful installation, and rejected candidate rollback.
-- README and test matrix document the confirmed Raspberry Pi OS v0.3.4 ABI failure and the new v0.3.5 workaround. Raspberry Pi hardware testing of v0.3.5 is still pending.
+- README and test matrix document the v0.3.4 GNU ABI failure and the subsequent successful v0.3.5 ARM64 static-musl installation and service-diagnostic test on Raspberry Pi OS (2026-11-12).
 - Diagnostics and JSON schema version 2 unchanged.
 
 ## [0.3.4] - 2026-11-12
