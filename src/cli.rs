@@ -238,6 +238,7 @@ mod tests {
         let c = Cli::parse(Vec::<String>::new()).unwrap();
         assert_eq!(c.command, Command::Diagnose);
         assert_eq!(c.since_seconds, 86_400);
+        assert_eq!(c.max_events, 5_000);
     }
 
     #[test]
