@@ -386,6 +386,35 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
 }
 
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
+    if snapshot.dpkg_checked == Some(true) && snapshot.dpkg_problem_count > 0 {
+        let count = snapshot.dpkg_problem_count;
+        let mut evidence = vec![format!(
+            "{count} {} not fully configured according to dpkg-query",
+            count_word(count, "package is", "packages are")
+        )];
+        for pkg in snapshot.dpkg_problems.iter().take(15) {
+            evidence.push(format!("{}: {}{}",
+                pkg.name, pkg.state,
+                if pkg.reinstall_required { " (reinstallation required)" } else { "" }));
+        }
+        if count > 15 {
+            evidence.push(format!("{} additional affected packages not listed; use dpkg --audit", count - 15));
+        }
+        findings.push(Finding {
+            id: "DPKG_INCOMPLETE_PACKAGES",
+            severity: Severity::Warning,
+            confidence: Confidence::Observed,
+            title: format!("{count} {} in an incomplete dpkg state",
+                count_word(count, "package", "packages")),
+            explanation: "The local dpkg status database contains unpacked, half-configured, half-installed or trigger-pending packages (or a reinstallation-required error). This is a current package-management issue, independent of systemd failed units. It does not identify why a package configuration failed.".into(),
+            evidence,
+            checks: vec![
+                "Inspect `dpkg --audit` for detailed, localized diagnostics".into(),
+                "Preview (do not execute) a possible fix with `apt-get -s -f install`".into(),
+                "Review relevant dpkg/apt logs and kernel package post-install scripts before changing packages".into(),
+            ],
+        });
+    }
     for disk in &snapshot.disks {
         if disk.used_percent >= 90 {
             let mut evidence = vec![format!("`df -PT` reports {}% used", disk.used_percent)];
@@ -545,6 +574,37 @@ mod tests {
         let report = analyze(snapshot, 60, Focus::Services, false);
         assert_eq!(report.findings.iter()
             .find(|f| f.id == "FAILED_USER_SYSTEMD_UNITS").unwrap().scope(), "current_snapshot");
+    }
+
+    #[test]
+    fn dpkg_incomplete_kernel_packages_are_current_warning() {
+        use crate::model::DpkgProblem;
+        let snapshot = Snapshot {
+            dpkg_checked: Some(true),
+            dpkg_problem_count: 4,
+            dpkg_problems: vec![
+                DpkgProblem { name: "linux-image-6.12.116+deb13-amd64".into(),
+                    state: "half-configured".into(), reinstall_required: false },
+                DpkgProblem { name: "linux-headers-amd64".into(),
+                    state: "unpacked".into(), reinstall_required: false },
+            ],
+            ..Snapshot::default()
+        };
+        let report = analyze(snapshot, 3600, Focus::System, false);
+        let finding = report.findings.iter().find(|f| f.id == "DPKG_INCOMPLETE_PACKAGES").unwrap();
+        assert_eq!(finding.scope(), "current_snapshot");
+        assert!(finding.title.contains("4 packages"));
+        assert!(finding.evidence.iter().any(|s| s.contains("half-configured")));
+        assert!(!report.findings.iter().any(|f| f.id == "NO_CLASSIFIED_ANOMALY"));
+    }
+
+    #[test]
+    fn healthy_or_unavailable_dpkg_does_not_generate_warning() {
+        for status in [None, Some(false), Some(true)] {
+            let report = analyze(Snapshot { dpkg_checked: status, ..Snapshot::default() },
+                3600, Focus::System, false);
+            assert!(!report.findings.iter().any(|f| f.id == "DPKG_INCOMPLETE_PACKAGES"));
+        }
     }
 
     #[test]

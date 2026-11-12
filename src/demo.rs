@@ -1,6 +1,6 @@
 //! Deterministic example inputs for screenshots and smoke tests.
 
-use crate::model::{DiskUsage, Event, EventKind, InterfaceStats, Snapshot};
+use crate::model::{DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats, Snapshot};
 use crate::time::now_unix;
 
 pub fn snapshot() -> Snapshot {
@@ -20,6 +20,12 @@ pub fn snapshot() -> Snapshot {
         failed_units: vec!["example-backup.service".into()],
         system_units_checked: true,
         failed_user_units: Some(vec![]),
+        dpkg_checked: Some(true),
+        dpkg_problem_count: 1,
+        dpkg_problems: vec![DpkgProblem {
+            name: "example-kernel-headers".into(), state: "unpacked".into(),
+            reinstall_required: false,
+        }],
         disks: vec![DiskUsage { mountpoint: "/".into(), used_percent: 64 }],
         disk_breakdowns: vec![],
         events: vec![
