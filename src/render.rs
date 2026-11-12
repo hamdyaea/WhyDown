@@ -54,6 +54,37 @@ pub fn text(report: &Report) -> String {
     }
 
     if report.focus.includes(Focus::System) {
+        writeln!(out, "HOST RESOURCE SNAPSHOT (read-only; optional probes)").unwrap();
+        if let Some(m) = &report.snapshot.memory_health {
+            writeln!(out, "  Memory: {} MiB available / {} MiB total",
+                m.available_kib / 1024, m.total_kib / 1024).unwrap();
+            if let (Some(total), Some(free)) = (m.swap_total_kib, m.swap_free_kib) {
+                writeln!(out, "  Swap: {} MiB free / {} MiB total", free/1024, total/1024).unwrap();
+            }
+        } else { writeln!(out, "  Memory: not verified").unwrap(); }
+        for p in &report.snapshot.pressure_health {
+            if let Some(some) = p.some_avg60_x100 {
+                write!(out, "  PSI {}: some avg60 {}.{:02}%", p.resource, some/100, some%100).unwrap();
+                if let Some(full) = p.full_avg60_x100 {
+                    write!(out, "; full avg60 {}.{:02}%", full/100, full%100).unwrap();
+                }
+                writeln!(out).unwrap();
+            }
+        }
+        if let Some(h) = &report.snapshot.file_handle_health {
+            writeln!(out, "  File handles: {} / {} maximum",
+                h.allocated.saturating_sub(h.unused), h.maximum).unwrap();
+        }
+        for inode in report.snapshot.inode_health.iter().take(20) {
+            writeln!(out, "  Inodes {}: {}% used", inode.mountpoint, inode.used_percent).unwrap();
+        }
+        if report.snapshot.inode_health.len() > 20 {
+            writeln!(out, "  More inode mounts omitted from text view").unwrap();
+        }
+        for md in &report.snapshot.raid_health {
+            writeln!(out, "  MD {}: {}/{} active members", md.name, md.active, md.expected).unwrap();
+        }
+        writeln!(out).unwrap();
         if let Some(checked) = report.snapshot.pacman_checked {
             writeln!(out, "CURRENT PACMAN LOCAL DATABASE CHECK (read-only)").unwrap();
             let status = if !checked {
@@ -297,6 +328,35 @@ pub fn json(report: &Report) -> String {
                 ("state", js(pkg.state.clone())),
                 ("reinstall_required", JsonValue::Bool(pkg.reinstall_required)),
             ])).collect())),
+            ("memory", match &s.memory_health {
+                Some(m) => object(vec![
+                    ("total_kib", n(m.total_kib)),
+                    ("available_kib", n(m.available_kib)),
+                    ("swap_total_kib", opt_num(m.swap_total_kib)),
+                    ("swap_free_kib", opt_num(m.swap_free_kib)),
+                ]),
+                None => JsonValue::Null,
+            }),
+            ("pressure", arr(s.pressure_health.iter().map(|p| object(vec![
+                ("resource", js(p.resource.clone())),
+                ("some_avg60_percent_x100", opt_num(p.some_avg60_x100.map(u64::from))),
+                ("full_avg60_percent_x100", opt_num(p.full_avg60_x100.map(u64::from))),
+            ])).collect())),
+            ("file_handles", match &s.file_handle_health {
+                Some(h) => object(vec![
+                    ("allocated", n(h.allocated)), ("unused", n(h.unused)),
+                    ("maximum", n(h.maximum)),
+                ]),
+                None => JsonValue::Null,
+            }),
+            ("inodes", arr(s.inode_health.iter().map(|i| object(vec![
+                ("mountpoint", js(i.mountpoint.clone())),
+                ("used_percent", n(i.used_percent as u64)),
+            ])).collect())),
+            ("md_arrays", arr(s.raid_health.iter().map(|md| object(vec![
+                ("name", js(md.name.clone())), ("expected", n(md.expected as u64)),
+                ("active", n(md.active as u64)),
+            ])).collect())),
             ("interfaces", arr(s.interfaces.iter().map(|iface| object(vec![
                 ("name", js(iface.name.clone())),
                 ("operstate", opt_str(&iface.operstate)),
@@ -420,6 +480,41 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         }
     }
     if report.focus.includes(Focus::System) {
+        out.push_str("<h2>Host resource snapshot</h2><p class=\"muted\">Read-only kernel measurements; unsupported sensors are not verified. Host values may differ from container limits.</p>");
+        if let Some(m) = &report.snapshot.memory_health {
+            write!(out, "<p>Memory available: {} / {} MiB</p>",
+                m.available_kib / 1024, m.total_kib / 1024).unwrap();
+        } else { out.push_str("<p>Memory: not verified</p>"); }
+        for p in &report.snapshot.pressure_health {
+            if let Some(some) = p.some_avg60_x100 {
+                write!(out, "<p>PSI {} some avg60: {}.{:02}%",
+                    html_escape(&p.resource), some / 100, some % 100).unwrap();
+                if let Some(full) = p.full_avg60_x100 {
+                    write!(out, "; full avg60 {}.{:02}%", full / 100, full % 100).unwrap();
+                }
+                out.push_str("</p>");
+            }
+        }
+        if let Some(h) = &report.snapshot.file_handle_health {
+            write!(out, "<p>Host file handles: {} / {}</p>",
+                h.allocated.saturating_sub(h.unused), h.maximum).unwrap();
+        }
+        if !report.snapshot.inode_health.is_empty() {
+            out.push_str("<h3>Inode usage</h3><ul>");
+            for inode in report.snapshot.inode_health.iter().take(20) {
+                write!(out, "<li><code>{}</code>: {}%</li>",
+                    html_escape(&inode.mountpoint), inode.used_percent).unwrap();
+            }
+            out.push_str("</ul>");
+        }
+        if !report.snapshot.raid_health.is_empty() {
+            out.push_str("<h3>Linux MD arrays</h3><ul>");
+            for md in &report.snapshot.raid_health {
+                write!(out, "<li><code>{}</code>: {}/{} active</li>",
+                    html_escape(&md.name), md.active, md.expected).unwrap();
+            }
+            out.push_str("</ul>");
+        }
         if let Some(checked) = report.snapshot.pacman_checked {
             out.push_str("<h2>pacman local database consistency</h2><p class=\"muted\">Read-only pacman -Dk; does not check installed file integrity or updates.</p><p>");
             out.push_str(if !checked { "Not verified: query unavailable" }
