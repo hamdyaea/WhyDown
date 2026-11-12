@@ -1,10 +1,10 @@
 # Cross-distribution validation matrix
 
-**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro was manually tested with released v0.7.0 static-musl and **v0.7.1 source-built code** on 2026-11-12; all-focus JSON, current service state and per-root-port USB grouping were confirmed. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were manually exercised with v0.3.5 as root and later as the normal user. The **v0.3.6 dpkg diagnostic has now been validated live**, identifying four kernel packages in incomplete states while both systemd managers reported zero failed units. JSON/HTML exports on the VM still require manual checking.
+**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro was manually tested with released v0.7.0 static-musl and **v0.7.1 source-built code and official v0.7.1 x86_64-musl archive** on 2026-11-12; all-focus JSON, current service state and per-root-port USB grouping were confirmed. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were manually exercised with v0.3.5 as root and later as the normal user. The **v0.3.6 dpkg diagnostic has now been validated live**, identifying four kernel packages in incomplete states while both systemd managers reported zero failed units. JSON/HTML exports on the VM still require manual checking.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | **v0.7.0 release installer + v0.7.1 source tested live (2026-11-12):** x86_64-musl SHA-256 passed; v0.7.0 scanned 5,356 journal entries without truncation. v0.7.1 source build passed 99 tests and real JSON confirmed active LightDM unit status plus 10 detached USB topology paths under root port `1-1`. | NetworkManager, XFS /var, pacman local DB, reboots |
+| Manjaro | x86_64 | **v0.7.0 and v0.7.1 release binaries + v0.7.1 source tested live (2026-11-12):** x86_64-musl SHA-256 passed; v0.7.0 scanned 5,356 journal entries without truncation. v0.7.1 source build passed 99 tests; official v0.7.1 x86_64-musl archive passed installer SHA-256 verification, version check and live 6,706-entry untruncated JSON diagnosis, confirming active LightDM and 10 USB topology paths on root port `1-1`. | NetworkManager, XFS /var, pacman local DB, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
 | Debian 13 (Trixie) VM | x86_64 | **v0.3.6 dpkg detection validated live**: `all` and `system` reported exactly four incompletely configured kernel packages previously confirmed by `dpkg --audit`; zero failed system/user units. Static-musl installation and previous text diagnostics also tested. JSON/HTML exports pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
@@ -207,7 +207,7 @@ User-provided terminal transcript confirms a successful `git pull --ff-only` to 
 - `interface_drop_deltas`: `wlan0` RX +0, TX +0 over 1,074 ms; a one-second no-change window does not certify ongoing packet-loss absence.
 - Network incident grouping reported one historical link incident and no spurious zero-count association-only incidents.
 
-**Validated:** installer, JSON report, journal completeness, observed findings/correlations, sampled interface deltas. **Still pending:** live HTML review, independent cause attribution for USB or LightDM, v0.7.1 **release-archive** validation, and broader distribution/platform testing. Avoid publishing raw journal identifiers or site-specific details from private logs.
+**Validated:** installer, JSON report, journal completeness, observed findings/correlations, sampled interface deltas. **Still pending:** live HTML review, independent cause attribution for USB or LightDM, additional distribution and architecture validation, and broader platform testing. Avoid publishing raw journal identifiers or site-specific details from private logs.
 
 ## Additional real kernel/systemd journal validation — 2026-11-12
 
@@ -220,10 +220,28 @@ User-supplied `journalctl -b -k` and `systemctl show` output supports the follow
 
 Under branch-aware grouping, the future output will identify the cascade on `1-1` independently from the two events on `1-5` (rather than treating all 12 topology paths as one root-port incident). The previously released v0.7.0 grouped all 12 events by time only. This branch-aware output has since been validated by the real source-built v0.7.1 diagnostic.
 
-The current unit-state collector has since been manually validated on Manjaro using the newly compiled v0.7.1 source, returning loaded/active/running/success and one LightDM restart in the JSON report. Testing of the **published v0.7.1 binary archives** remains separate and pending.
+The current unit-state collector has since been manually validated on Manjaro using the newly compiled v0.7.1 source, returning loaded/active/running/success and one LightDM restart in the JSON report. The **published v0.7.1 x86_64-musl binary** has since been validated on real Manjaro hardware. The three other published architecture/libc variants remain untested on their target systems.
 
 ## Live Manjaro v0.7.1 source-build validation (2026-11-12)
 
 The user's `cargo test --locked` completed successfully: **88 unit tests** in the library and **11 CLI integration tests** (99 total, no failures). `cargo build --release --locked` succeeded. The binary was then invoked from `./target/release/whydown` with `--focus all --current-boot --since 3h --max-events 10000 --format json --output whydown-validation.json --overwrite`; report creation succeeded in about one second.
 
 A separate `jq` read of the generated report verified `system.service_statuses` for `lightdm.service`: `load_state=loaded`, `active_state=active`, `sub_state=running`, `result=success`, `n_restarts=1`. `SERVICE_RESTART_OBSERVED` had `confidence=observed` and the matching systemd evidence. The `USB_DISCONNECT_BURST` finding reported **10 distinct topology paths under root-port `1-1`** within 30 seconds starting `2026-11-12T15:01:42Z`, and nearby Realtek `r8152` status. Neither fact proves application readiness or the physical cause of USB detachments. The installed v0.7.0 static-musl binary and the source-built v0.7.1 code must not be conflated: the latter was validated here, the former in the prior run.
+
+## Published v0.7.1 archive — final live Manjaro validation (2026-11-12)
+
+The user upgraded the checked-out `main` branch to release commit `d89f117`. The guided installer selected `x86_64-unknown-linux-musl`, downloaded the **published v0.7.1 archive and its SHA-256 file**, verified the checksum successfully and installed the executable under `~/.local/bin/whydown`. `~/.local/bin/whydown --version` returned `whydown 0.7.1`. This is a different verification from the earlier source-built binary tests.
+
+The **installed release executable** completed:
+
+```bash
+~/.local/bin/whydown diagnose --focus all --current-boot --since 4h --max-events 10000 --format json --output whydown-v071-final.json --overwrite
+```
+
+- Duration approximately one second; report saved successfully.
+- JSON `version=0.7.1`, `journal_entries_examined=6706`, `journal_truncated=false`.
+- Current `system.service_statuses` returned `lightdm.service` load=loaded, active=active, sub=running, result=success, NRestarts=1.
+- Historical `SERVICE_RESTART_OBSERVED` remains an informational finding with `confidence=observed`; its evidence includes systemd's current state, not a claim of application readiness.
+- Historical `USB_DISCONNECT_BURST` reported exactly **10 distinct USB topology paths under root-port branch `1-1`** within 30 seconds beginning `2026-11-12T15:01:42Z`, with a nearby Realtek `r8152` USB transport error.
+
+**Validated:** released x86_64-musl artifact, checksum verification, version, JSON output, full journal window, bounded service-status collection and branch-aware USB grouping on Manjaro. **Not validated:** root causes, continuous network reachability, graphical HTML rendering on this host, and the release archives for other architectures/libc variants.
