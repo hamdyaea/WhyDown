@@ -323,3 +323,12 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - A new `tests/test_readme.py` asserts the referenced `docs/images/whydown-gui-dark.jpg` is committed, has valid JPEG markers and a nontrivial size; it checks that long-form technical material remains in `docs/PROJECT_HISTORY.md`.
 - The screenshot generator `scripts/capture_gui_for_readme.py` uses only **fictional WhyDown demo evidence** and isolated Qt settings under Xvfb, rather than inspecting real journal data. Its output is versioned in Git; release tests do not regenerate or mutate it.
 - These checks run in normal Linux CI and the release preflight. GUI clipboard integration on physical Manjaro/Debian desktops remains a separate field test.
+
+## v0.10.3 branding and output compatibility
+
+- `whydown icon` emits the embedded official PNG; verify signature and nonempty data.
+- `whydown logo` displays a portable ASCII identity without reading host data.
+- Human-readable CLI branding is restricted to terminals, never JSON/HTML, pipes or saved output.
+- TUI shows the ASCII logo on the dashboard without changing navigation.
+- Qt6 Xvfb verifies icon loading into the actual window and sidebar.
+- Installer desktop smoke test compares PNG icon bytes and validates Icon=whydown.
