@@ -8,6 +8,7 @@ pub mod demo;
 pub mod engine;
 pub mod health;
 pub mod model;
+pub mod progress;
 pub mod render;
 pub mod time;
 
