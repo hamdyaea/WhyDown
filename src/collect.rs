@@ -816,6 +816,9 @@ mod tests {
     fn nameservers() {
         assert_eq!(parse_resolv_conf("# comment\nnameserver 127.0.0.53\nnameserver 1.1.1.1\n"), (2, true));
         assert_eq!(parse_resolv_conf("search example.org\n"), (0, false));
+        assert_eq!(parse_resolv_conf("nameserver not-an-ip\n"), (0, false));
+        assert_eq!(parse_resolv_conf("nameserver 2001:4860:4860::8888\n"), (1, false));
+        assert_eq!(parse_resolv_conf("nameserver fe80::1%wlan0\n"), (1, false));
     }
 
     #[test]
