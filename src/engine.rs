@@ -386,6 +386,21 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
 }
 
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
+    if snapshot.pacman_checked == Some(true) && snapshot.pacman_consistent == Some(false) {
+        findings.push(Finding {
+            id: "PACMAN_DATABASE_CHECK_FAILED",
+            severity: Severity::Warning,
+            confidence: Confidence::Limited,
+            title: "pacman local database consistency check returned an error".into(),
+            explanation: "The read-only pacman -Dk check returned nonzero. This can indicate inconsistent package metadata or dependencies, but also a command/access error. It does not prove database corruption and does not verify all installed file contents.".into(),
+            evidence: vec!["pacman -Dk returned nonzero; no raw pacman output retained".into()],
+            checks: vec![
+                "Run pacman -Dk interactively to inspect detailed messages".into(),
+                "Inspect package database access and pacman.log before considering changes".into(),
+                "For installed-file presence checks use pacman -Qk separately (can take time)".into(),
+            ],
+        });
+    }
     if snapshot.dpkg_checked == Some(true) && snapshot.dpkg_problem_count > 0 {
         let count = snapshot.dpkg_problem_count;
         let mut evidence = vec![format!(
@@ -574,6 +589,33 @@ mod tests {
         let report = analyze(snapshot, 60, Focus::Services, false);
         assert_eq!(report.findings.iter()
             .find(|f| f.id == "FAILED_USER_SYSTEMD_UNITS").unwrap().scope(), "current_snapshot");
+    }
+
+    #[test]
+    fn pacman_failure_is_a_limited_current_warning() {
+        let report = analyze(Snapshot {
+            pacman_checked: Some(true), pacman_consistent: Some(false),
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        let finding = report.findings.iter()
+            .find(|f| f.id == "PACMAN_DATABASE_CHECK_FAILED").unwrap();
+        assert_eq!(finding.scope(), "current_snapshot");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.confidence, Confidence::Limited);
+    }
+
+    #[test]
+    fn pacman_success_or_unavailable_is_not_a_failure() {
+        for (checked, consistent) in [
+            (None, None), (Some(false), None), (Some(true), Some(true))
+        ] {
+            let report = analyze(Snapshot {
+                pacman_checked: checked, pacman_consistent: consistent,
+                ..Snapshot::default()
+            }, 3600, Focus::System, false);
+            assert!(!report.findings.iter()
+                .any(|f| f.id == "PACMAN_DATABASE_CHECK_FAILED"));
+        }
     }
 
     #[test]

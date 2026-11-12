@@ -39,7 +39,8 @@ impl Finding {
         match self.id {
             "ROUTE_MISSING" | "IPV4_ROUTE_MISSING" | "DNS_UNCONFIGURED"
             | "DNS_STUB_INACTIVE" | "FAILED_SYSTEMD_UNITS" | "FAILED_USER_SYSTEMD_UNITS"
-            | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" | "DPKG_INCOMPLETE_PACKAGES" => "current_snapshot",
+            | "IFACE_ERROR_COUNTERS" | "DISK_NEAR_FULL" | "DPKG_INCOMPLETE_PACKAGES"
+            | "PACMAN_DATABASE_CHECK_FAILED" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" => "unverified",
             _ => "historical_journal",
         }
@@ -250,6 +251,10 @@ pub struct Snapshot {
     /// Total number before the display cap.
     pub dpkg_problem_count: usize,
     pub dpkg_problems: Vec<DpkgProblem>,
+    /// None: pacman local database absent; false: command unavailable; true: completed.
+    pub pacman_checked: Option<bool>,
+    /// None: not checked; true: pacman -Dk succeeded; false: nonzero exit.
+    pub pacman_consistent: Option<bool>,
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
@@ -276,6 +281,8 @@ impl Default for Snapshot {
             dpkg_checked: None,
             dpkg_problem_count: 0,
             dpkg_problems: Vec::new(),
+            pacman_checked: None,
+            pacman_consistent: None,
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),

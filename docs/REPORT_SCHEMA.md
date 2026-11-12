@@ -71,3 +71,12 @@ Top-level `journal_current_boot_only` (boolean) indicates whether `journalctl --
 `--exit-on-warning` is a CLI process status policy, not a JSON field. Exit codes: 0 for successful report generation (including warnings without that flag), 1 for warnings **with** the flag, and 2 for CLI/report write errors. Successful report generation does not guarantee a healthy host.
 
 Collector processes are time-bounded and stdout-limited. Collection failures, timeouts and oversized outputs must appear in `collection_notes` and should not be interpreted as a healthy subsystem. File output uses private Unix permissions, and `--overwrite` uses staged replacement.
+
+
+## Additions in WhyDown v0.4.1 (schema remains 2)
+
+Under `system`:
+- `pacman_checked`: `null` when the pacman local database is not found (or outside system focus); `false` if found but querying was unavailable; `true` after `pacman -Dk` returned a status.
+- `pacman_consistent`: `null` when unchecked, `true` for `pacman -Dk` success and `false` for a nonzero command status.
+
+A nonzero command status emits `PACMAN_DATABASE_CHECK_FAILED` with `scope=current_snapshot` and `confidence=limited`. This does not prove the database is corrupt, all installed files exist or that the machine is healthy. dpkg and pacman databases are checked independently where present.

@@ -22,6 +22,8 @@ pub fn snapshot() -> Snapshot {
         failed_user_units: Some(vec![]),
         dpkg_checked: Some(true),
         dpkg_problem_count: 1,
+        pacman_checked: None,
+        pacman_consistent: None,
         dpkg_problems: vec![DpkgProblem {
             name: "example-kernel-headers".into(), state: "unpacked".into(),
             reinstall_required: false,
