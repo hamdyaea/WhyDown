@@ -51,6 +51,8 @@ jobs:
       - run: cargo test --all-targets --locked
       - run: cargo clippy --all-targets --locked
       - run: cargo build --release --locked
+      - name: Guided installer smoke test (no network)
+        run: sh tests/install_smoke.sh
       - name: Verify demo and JSON output
         run: |
           set -euo pipefail
@@ -106,8 +108,9 @@ jobs:
           mkdir -p package dist
           cp "target/${target}/release/whydown" package/
           cp README.md LICENSE package/
+          cp scripts/install.sh package/install.sh
           ./package/whydown --version | grep -Fx "whydown ${version}"
-          tar -czf "dist/${filename}" -C package whydown README.md LICENSE
+          tar -czf "dist/${filename}" -C package whydown README.md LICENSE install.sh
           ( cd dist && sha256sum "${filename}" > "${filename}.sha256" )
           ( cd dist && sha256sum -c "${filename}.sha256" )
       - uses: actions/upload-artifact@v4

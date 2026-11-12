@@ -23,6 +23,8 @@ jobs:
         run: cargo clippy --all-targets
       - name: Build release
         run: cargo build --release
+      - name: Guided installer smoke test (no network)
+        run: sh tests/install_smoke.sh
       - name: Demo smoke test
         run: |
           ./target/release/whydown demo --format json --output example.json

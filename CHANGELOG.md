@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.3.4] - 2026-11-12
+
+### Added
+- Guided, unprivileged binary installer `scripts/install.sh` for Linux x86_64 and aarch64, with glibc/musl detection and verified release SHA-256 checksums.
+- Optional `--from-source` and `--check-build-prereqs` modes explain when rustc, cargo and a C compiler are missing. No automatic package installation.
+- No-network installer smoke test and source-install CI verification, including release packaging of `install.sh`.
+- Detailed Raspberry Pi OS / Debian Rust installation and `PATH` troubleshooting guidance in README.
+
+### Validation
+- Raspberry Pi OS ARM64 (Debian 12 bookworm, kernel 6.12.115+rpt-rpi-v8): WhyDown v0.3.3 compiled successfully using Rust 1.99.1 and GCC 12.2 and detected failed system/user units. v0.3.4 installer still requires manual Raspberry Pi validation.
+
+### Compatibility
+- Diagnostic engine and JSON schema v2 unchanged.
+
 ## [0.3.3] - 2026-11-12
 
 ### Improved

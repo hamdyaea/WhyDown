@@ -1,11 +1,11 @@
 # Cross-distribution validation matrix
 
-**Status: test plan, not a claim of completed manual validation.** CI builds on Ubuntu and checks synthetic journal fixtures. The Manjaro network, disk and service behavior was manually investigated through v0.3.0; a v0.3.3 retest and other environments are pending.
+**Status: test plan, not a claim of completed manual validation.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64) compiled v0.3.3 and diagnosed failed system/user services. Manual testing of the new v0.3.4 installer and other distributions remains pending.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | Tested through v0.3.2; retest v0.3.3 | NetworkManager, XFS /var, pacman cache, reboots |
-| Raspberry Pi OS 64-bit | aarch64 | Planned | systemd, headless ARM, low-power disk I/O |
+| Manjaro | x86_64 | Tested through v0.3.3; retest v0.3.4 installer | NetworkManager, XFS /var, pacman cache, reboots |
+| Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3 compiled and diagnosed services successfully; v0.3.4 installer pending | systemd, headless ARM, low-power disk I/O |
 | Debian VM | x86_64 | Planned | systemd, DHCP, small VM disk |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
 | Ubuntu Server | x86_64 or aarch64 | Planned | headless services, journal permissions |
@@ -34,3 +34,8 @@ For services, compare `systemctl --failed` with `systemctl --user --failed`, and
 
 
 In v0.3.2, verify that a `sudo journalctl --grep='Failed to start'` audit command does not itself become a service-failure event, and compare the approximate `boot_relation` with `journalctl --list-boots` when practical.
+
+
+## v0.3.4 guided installer checks
+
+Run `sh scripts/install.sh --print-target` and `--dry-run` to check architecture selection without downloading. Run `--check-build-prereqs` to verify source-build tools. The default installer downloads to `~/.local/bin` without Rust/Cargo or root privileges. After installation verify `~/.local/bin/whydown --version`. This feature must be validated manually on the Raspberry Pi before it is marked as hardware-tested.
