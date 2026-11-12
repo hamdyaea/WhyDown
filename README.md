@@ -59,6 +59,21 @@ sh scripts/install.sh                 # verify SHA-256 and install under ~/.loca
 
 The installer downloads and checks the archive, then runs `--version` **before replacing an existing WhyDown executable**. If that fails, the existing installation is preserved. It stages an executable on the same filesystem and atomically renames it after verification. No Rust/Cargo, root privileges or service changes are needed. The installer downloads from GitHub; WhyDown's diagnostics remain offline. Checksums do **not** constitute publisher signatures. Use `--libc gnu` only when the glibc requirements of that release are satisfied, `--libc musl` to force static musl, and `--prefix /absolute/path` to change the installation directory.
 
+### Verified Raspberry Pi OS ARM64 installation (Debian 12)
+
+**Manually verified on 2026-11-12** on Raspberry Pi OS 64-bit, Debian GNU/Linux 12 (bookworm), kernel `6.12.115+rpt-rpi-v8`: v0.3.5 correctly selected `aarch64-unknown-linux-musl`, downloaded its release, verified the SHA-256 checksum (`OK`), installed `~/.local/bin/whydown`, displayed `whydown 0.3.5` and executed `--focus services` successfully. The installer used a **precompiled executable rather than Cargo**, although Rust was already present on this machine.
+
+```bash
+cd ~/WhyDown
+git pull --ff-only
+sh scripts/install.sh --print-target
+sh scripts/install.sh
+~/.local/bin/whydown --version
+~/.local/bin/whydown diagnose --focus services --since 24h --max-events 5000
+```
+
+The service diagnostic reported two failed system units and one failed user unit. WhyDown did not modify or restart these services.
+
 ### Raspberry Pi OS / Debian 12: GLIBC_2.39 not found
 
 The v0.3.4 GNU/ARM64 release was linked against glibc 2.39, which is newer than Debian 12's glibc 2.36. **Do not upgrade the Raspberry Pi's system glibc solely to run WhyDown.**
@@ -294,7 +309,7 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64) compiled v0.3.3 and diagnosed system/user services successfully. The v0.3.4 GNU download passed SHA-256 verification but failed to start because it needed GLIBC_2.39. The new v0.3.5 static-musl installer still needs a live Raspberry Pi test.** See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.3.3. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed. Other distributions and ARM64 devices remain untested.** See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
