@@ -170,3 +170,21 @@ The next JSON run used the same scope **but no explicit `--max-events`**, so the
 - Truncation plus no matched anomalies yields `INSUFFICIENT_EVIDENCE`; truncation plus matched warning retains the warning and emits `JOURNAL_WINDOW_TRUNCATED` info
 - Text, JSON, HTML expose the sampling status and number of examined entries; JSON schema remains 2, no raw journal lines retained
 - Manually compare text and JSON using identical `--since`, `--current-boot` and `--max-events` arguments on Manjaro after v0.6.1 release. No on-host v0.6.1 validation yet.
+
+
+## v0.6.1 Manjaro x86_64 confirmed field test (2026-11-12)
+
+The user installed the static-musl v0.6.1 release with successful SHA-256 verification. Text and JSON diagnostics with identical current-boot/all/24-hour/5,000-entry settings agreed on `LINK_DISCONNECTS` (wlan0) and `SERVICE_FAILURE_LOGS` (lightdm). JSON recorded `journal_checked=true`, `journal_truncated=false`, `journal_entries_examined=4598`. The user also supplied local historical kernel and systemd logs: many USB detachments close together (USB hub, Realtek r8152 and DisplayLink), wlan0 deauthentication followed 18s later by association, later deauthentication *by local choice* followed by another association, and a LightDM failure with a systemd restart scheduled shortly afterward. These facts do not prove causality, hardware failure, Internet recovery or application readiness.
+
+## v0.7.0 regression and manual validation plan
+
+- Parse real-style `usb 1-5.1: USB disconnect` lines and r8152 status -71 as USB context, with no retention of serials or raw messages. Four separate bus paths in 30s produce one `USB_DISCONNECT_BURST`; fewer do not.
+- Parse `wlan0: associated` after `wlan0: deauthenticated`, report a matched positive association after 18s in warning evidence. A different interface never counts as the same link recovery.
+- Treat `wlan0: deauthenticating ... by local choice` followed immediately by association as informational `WIFI_LOCAL_ROAM_OBSERVED`, not an additional link-down warning.
+- Recognize `lightdm.service: Scheduled restart job` separately from failure. With a verified current systemd unit snapshot showing no failure, add the informational restart observation but keep the historical failure warning.
+- Confirm non-fault UFW BLOCK lines and positive association messages do not become false network incident windows.
+- Compare two /proc/net/dev samples without additional delay; report packet-drop deltas in terminal, JSON, HTML; exclude resets and unmatched interfaces. Informational changes require >=10 drops over >=100ms.
+- Filesystem advisory at 85–89% is informational, >=90% is still a warning; no disk cleanup is attempted.
+- Current branch and CI test all outputs automatically. Manual v0.7.0 testing on Manjaro, Debian 13 and Raspberry Pi OS is still pending.
+
+Isolated r8152 -71 messages produce an informational `USB_TRANSPORT_STATUS` rather than a hardware fault warning; <=3 USB detachments or detaches outside the 30-second window do not trigger the burst finding.

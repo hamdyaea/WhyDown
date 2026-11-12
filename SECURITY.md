@@ -29,3 +29,8 @@ Subprocess data collection is bounded by elapsed time and stdout volume to avoid
 Unix report files use permission mode `0600`. `--overwrite` stages, synchronizes and atomically renames a replacement, preserving previous content when staging/writing fails. Exported data may reveal local package names, interface labels, service names or filesystem paths; review before distributing.
 
 `--exit-on-warning` is opt-in and reports findings, not verified root causes. Never use it as a substitute for authoritative host monitoring.
+
+
+## v0.7.0 safe incident correlation
+
+Only short, validated USB topology port identifiers and Wi-Fi/systemd interface or unit identifiers are kept in parsed events; Wi-Fi BSSIDs, kernel message bodies, firewall IPs/ports and device serial numbers remain excluded. Two /proc/net/dev reads are passive, local snapshots and do not inject traffic. USB and Wi-Fi correlation is timing evidence rather than proof of hardware failure or network recovery; a scheduled systemd restart is not proof of service readiness. Never include sensitive raw log lines in published test fixtures.

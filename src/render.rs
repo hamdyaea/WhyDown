@@ -53,6 +53,16 @@ pub fn text(report: &Report) -> String {
                     iface.name, iface.operstate.as_deref().unwrap_or("unknown")).unwrap();
             }
         }
+        if let Some(deltas) = &report.snapshot.interface_drop_deltas {
+            writeln!(out, "  Counter changes observed during this diagnostic (not lifetime totals):").unwrap();
+            if deltas.is_empty() { writeln!(out, "    No comparable interfaces or counters reset").unwrap(); }
+            for d in deltas.iter().take(20) {
+                writeln!(out, "    {}: RX dropped +{}, TX dropped +{} over {} ms",
+                    d.name, d.rx_dropped_delta, d.tx_dropped_delta, d.elapsed_ms).unwrap();
+            }
+        } else {
+            writeln!(out, "  Counter changes: no second comparable sample").unwrap();
+        }
         writeln!(out).unwrap();
     }
 
@@ -399,6 +409,15 @@ pub fn json(report: &Report) -> String {
                 ("name", js(md.name.clone())), ("expected", n(md.expected as u64)),
                 ("active", n(md.active as u64)),
             ])).collect())),
+            ("interface_drop_deltas", match &s.interface_drop_deltas {
+                Some(deltas) => arr(deltas.iter().map(|d| object(vec![
+                    ("name", js(d.name.clone())),
+                    ("rx_dropped_delta", n(d.rx_dropped_delta)),
+                    ("tx_dropped_delta", n(d.tx_dropped_delta)),
+                    ("elapsed_ms", n(d.elapsed_ms)),
+                ])).collect()),
+                None => JsonValue::Null,
+            }),
             ("interfaces", arr(s.interfaces.iter().map(|iface| object(vec![
                 ("name", js(iface.name.clone())),
                 ("operstate", opt_str(&iface.operstate)),
@@ -524,6 +543,14 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         for iface in report.snapshot.interfaces.iter().take(20) {
             write!(out, "<p>Interface <code>{}</code>: operstate=<code>{}</code></p>",
                 html_escape(&iface.name), html_escape(iface.operstate.as_deref().unwrap_or("unknown"))).unwrap();
+        }
+        if let Some(deltas) = &report.snapshot.interface_drop_deltas {
+            out.push_str("<h3>Interface counter changes during diagnostic</h3><ul>");
+            for d in deltas.iter().take(20) {
+                write!(out, "<li><code>{}</code>: RX dropped +{}, TX dropped +{} over {} ms</li>",
+                    html_escape(&d.name), d.rx_dropped_delta, d.tx_dropped_delta, d.elapsed_ms).unwrap();
+            }
+            out.push_str("</ul>");
         }
     }
     if report.focus.includes(Focus::System) {
@@ -667,6 +694,19 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn sampled_drop_deltas_are_rendered_separately_from_cumulative_totals() {
+        let mut snapshot = demo::snapshot();
+        snapshot.interface_drop_deltas = Some(vec![crate::model::NetworkDropDelta {
+            name: "wlan0".into(), rx_dropped_delta: 12, tx_dropped_delta: 2,
+            elapsed_ms: 1500,
+        }]);
+        let report = engine::analyze(snapshot, 3600, Focus::All, true);
+        assert!(text(&report).contains("RX dropped +12, TX dropped +2"));
+        assert!(json(&report).contains("\"rx_dropped_delta\": 12"));
+        assert!(html(&report).contains("Interface counter changes during diagnostic"));
+    }
 
     #[test]
     fn truncated_journal_is_visible_in_text_json_and_html() {

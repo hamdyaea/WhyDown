@@ -44,7 +44,8 @@ impl Finding {
             | "MEMORY_STALL_PRESSURE" | "IO_STALL_PRESSURE"
             | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
             | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY"
-            | "CPU_CONTENTION_PRESSURE" => "current_snapshot",
+            | "CPU_CONTENTION_PRESSURE" | "RECENT_INTERFACE_DROPS"
+            | "DISK_CAPACITY_WATCH" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE"
             | "JOURNAL_WINDOW_TRUNCATED" => "unverified",
             _ => "historical_journal",
@@ -111,6 +112,11 @@ pub enum EventKind {
     OutOfMemory,
     StorageError,
     FileHandleExhaustion,
+    WifiAssociated,
+    WifiRoamStart,
+    UsbDisconnect,
+    UsbTransportError,
+    ServiceRestartScheduled,
 }
 
 impl EventKind {
@@ -124,6 +130,11 @@ impl EventKind {
             Self::OutOfMemory => "out_of_memory",
             Self::StorageError => "storage_error",
             Self::FileHandleExhaustion => "file_handle_exhaustion",
+            Self::WifiAssociated => "wifi_associated",
+            Self::WifiRoamStart => "wifi_roam_start",
+            Self::UsbDisconnect => "usb_disconnect",
+            Self::UsbTransportError => "usb_transport_error",
+            Self::ServiceRestartScheduled => "service_restart_scheduled",
         }
     }
 
@@ -137,16 +148,24 @@ impl EventKind {
             Self::OutOfMemory => "Out-of-memory event reported",
             Self::StorageError => "Storage error reported",
             Self::FileHandleExhaustion => "File descriptor exhaustion reported",
+            Self::WifiAssociated => "Wi-Fi association observed",
+            Self::WifiRoamStart => "Local-choice Wi-Fi handoff observed",
+            Self::UsbDisconnect => "USB peripheral disconnected",
+            Self::UsbTransportError => "USB transport error reported",
+            Self::ServiceRestartScheduled => "Service restart scheduled",
         }
     }
 
     pub fn focus(self) -> Focus {
         match self {
-            Self::LinkDown | Self::DhcpProblem | Self::DnsProblem | Self::NetworkUnreachable => {
+            Self::LinkDown | Self::DhcpProblem | Self::DnsProblem
+            | Self::NetworkUnreachable | Self::WifiAssociated
+            | Self::WifiRoamStart => {
                 Focus::Network
             }
-            Self::ServiceFailure => Focus::Services,
-            Self::OutOfMemory | Self::StorageError | Self::FileHandleExhaustion => Focus::System,
+            Self::ServiceFailure | Self::ServiceRestartScheduled => Focus::Services,
+            Self::OutOfMemory | Self::StorageError | Self::FileHandleExhaustion
+            | Self::UsbDisconnect | Self::UsbTransportError => Focus::System,
         }
     }
 }
@@ -170,6 +189,15 @@ pub struct InterfaceStats {
     pub rx_dropped: u64,
     pub tx_errors: u64,
     pub tx_dropped: u64,
+}
+
+/// Two monotonic samples from /proc/net/dev during the same diagnosis.
+#[derive(Debug, Clone)]
+pub struct NetworkDropDelta {
+    pub name: String,
+    pub rx_dropped_delta: u64,
+    pub tx_dropped_delta: u64,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +322,8 @@ pub struct Snapshot {
     pub dns_stub: bool,
     pub resolved_active: Option<bool>,
     pub interfaces: Vec<InterfaceStats>,
+    /// None when a second usable /proc/net/dev sample was unavailable.
+    pub interface_drop_deltas: Option<Vec<NetworkDropDelta>>,
     pub failed_units: Vec<String>,
     pub system_units_checked: bool,
     /// None when the user's systemd manager is inaccessible.
@@ -346,6 +376,7 @@ impl Default for Snapshot {
             dns_stub: false,
             resolved_active: None,
             interfaces: Vec::new(),
+            interface_drop_deltas: None,
             failed_units: Vec::new(),
             system_units_checked: false,
             failed_user_units: None,
