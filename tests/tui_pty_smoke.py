@@ -57,7 +57,7 @@ def exercise(binary):
         send("2")
         wait_for("Focus changed to network")
         send("5")
-        wait_for("Journal cap changed to 10000")
+        wait_for("Journal cap changed to 5000")
         send("1")
         wait_for("Diagnostic completed:")
         send("6")  # MUST be interpreted immediately after diagnostic
