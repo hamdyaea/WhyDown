@@ -113,3 +113,11 @@ User installed v0.4.1 via the default x86_64-musl installer, with successful SHA
 ## v0.5.0 resource sensor manual test plan
 
 Run `whydown diagnose --focus system --current-boot --since 24h` and `whydown diagnose --format json --output resource-report.json` on each target distribution. Compare host metrics with `cat /proc/meminfo`, `cat /proc/pressure/{cpu,memory,io}`, `cat /proc/sys/fs/file-nr`, `df -Pi`, and `cat /proc/mdstat` where those interfaces exist. Do not fabricate outages or intentionally exhaust RAM, inodes, file handles or RAID members on production machines; rely on deterministic parser fixtures for fault cases. Real host tests of v0.5.0 are pending.
+
+
+## v0.5.1 live progress validation
+
+- Automated: CLI parses `--progress` and `--no-progress` with auto-by-default; formatting unit tests verify phase-based 0/50/100%.
+- Automated: forcing progress on redirected stderr still produces machine-readable JSON on stdout and progress on stderr; suppressing it produces no progress output.
+- Automated: progress thread is joined on normal completion and early errors; the report is not marked 100% complete on write failure.
+- Manual pending: confirm smooth animated TTY bar during the potentially slow `pacman -Dk` / `journalctl` phases on Manjaro, Raspberry Pi OS and Debian 13. Avoid interpreting phase percentages as remaining time.
