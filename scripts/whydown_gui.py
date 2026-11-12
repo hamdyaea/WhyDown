@@ -1,153 +1,156 @@
 #!/usr/bin/env python3
-"""WhyDown graphical frontend (Tkinter; optional system dependency).
+"""WhyDown Qt6 desktop. GPL-3.0-only, offline and read-only.
 
-The Rust diagnostic engine remains the single source of findings.  This
-frontend only executes the installed binary without a shell, renders JSON v2,
-and saves a private JSON copy only when the user explicitly requests it.
-No network calls, telemetry, privileged commands, or automatic repairs.
+PyQt6 is needed only for GUI mode; the existing CLI/TUI are independent.
+Evidence uses an ENABLED read-only QPlainTextEdit for real mouse selections.
 """
 from __future__ import annotations
-
 import argparse
 import json
 import os
-import queue
 import re
-import subprocess
 import sys
-import threading
 
 try:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from PyQt6 import QtCore, QtGui, QtWidgets
 except ImportError:
-    tk = None
-    filedialog = messagebox = ttk = None
+    QtCore = QtGui = QtWidgets = None
 
 FOCUSES = ("all", "network", "services", "system")
 LOOKBACKS = ("1h", "4h", "24h", "7d")
 MAX_EVENTS = ("5000", "10000")
 MAX_REPORT_BYTES = 8 * 1024 * 1024
 
+STYLE = """
+QMainWindow, QWidget#Root { background: #f2f6fb; color: #1c2b3e; }
+QFrame#Sidebar { background: #142136; border: 0; }
+QLabel#Brand { color: white; font-size: 23px; font-weight: 800; }
+QLabel#SideCaption { color: #91a9c6; font-size: 10px; font-weight: 600; }
+QPushButton#Nav { background: transparent; color: #bdd0e1; text-align: left;
+  border: none; border-radius: 10px; padding: 12px 17px; font-weight: 600; }
+QPushButton#Nav:hover { background: #253951; }
+QPushButton#Nav:checked { background: #265263; color: #9ff2df; }
+QLabel#Title { color: #1b2b40; font-size: 26px; font-weight: 800; }
+QLabel#Muted { color: #6c7f96; font-size: 11px; }
+QLabel#CardTitle { color: #263950; font-size: 13px; font-weight: 800; }
+QLabel#CardValue { color: #192b42; font-size: 26px; font-weight: 800; }
+QLabel#CardCaption { color: #74869b; font-size: 10px; }
+QLabel#Pill { color: #0a8073; background: #d7f5ee; border-radius: 10px;
+  padding: 7px 11px; font-size: 10px; font-weight: 800; }
+QFrame#Card { background: white; border: 1px solid #e1e9f2; border-radius: 13px; }
+QComboBox { background: #f8fafc; color: #29384c; border: 1px solid #dce4ee;
+  border-radius: 8px; padding: 8px; min-width: 94px; }
+QComboBox:hover { border: 1px solid #148c85; }
+QCheckBox { color: #40546a; font-size: 11px; }
+QPushButton#Primary { color: white; background: #118d84; border: none;
+  border-radius: 9px; font-size: 12px; font-weight: 800; padding: 12px 20px; }
+QPushButton#Primary:hover { background: #08776e; }
+QPushButton#Primary:disabled { background: #99c6c0; }
+QPushButton#Secondary { background: #fff; color: #30455e;
+  border: 1px solid #dae5ed; border-radius: 9px;
+  padding: 10px 15px; font-size: 11px; font-weight: 700; }
+QPushButton#Secondary:hover { background: #eaf5f3; }
+QTabWidget::pane { background: #fff; border: 1px solid #e1e9f2;
+  border-radius: 10px; }
+QTabBar::tab { background: transparent; color: #647b92;
+  padding: 12px 19px; font-weight: 700; font-size: 11px; }
+QTabBar::tab:selected { color: #0b887e; border-bottom: 3px solid #12ac9d; }
+QTreeWidget { background: white; color: #293b50; border: 0;
+  alternate-background-color: #f5f9fc; }
+QTreeWidget::item { min-height: 30px; padding: 3px; }
+QTreeWidget::item:selected { color: #124439; background: #d4f1e8; }
+QHeaderView::section { background: #f4f7fb; color: #64798d; border: 0;
+  border-bottom: 1px solid #e0e8f1; padding: 9px; font-weight: 700; }
+QPlainTextEdit { color: #1d354a; background: #fff; border: 0;
+  selection-color: #103d39; selection-background-color: #a3e4d9;
+  font-family: monospace; font-size: 12px; padding: 12px; }
+QSplitter::handle { background: #e5edf5; width: 2px; }
+QProgressBar { border: 0; background: #e1e9f0; border-radius: 3px; height: 5px; }
+QProgressBar::chunk { background: #10a99b; border-radius: 3px; }
+"""
 
 def build_command(binary, *, demo=False, focus="all", since="4h",
                   max_events=10000, current_boot=True, disk_details=False,
                   include_remote_mounts=False):
-    """Only bounded, known CLI arguments; never use a shell."""
     if focus not in FOCUSES:
-        raise ValueError("Unsupported diagnostic focus")
+        raise ValueError("Invalid diagnostic scope")
     match = re.fullmatch(r"([0-9]+)([mhd])", since)
     if match is None:
-        raise ValueError("Journal lookback must use minutes, hours or days")
+        raise ValueError("Invalid lookback")
     seconds = int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
     if not 60 <= seconds <= 30 * 86400:
-        raise ValueError("Journal lookback must be from one minute to 30 days")
+        raise ValueError("Lookback outside safe range")
     if str(max_events) not in MAX_EVENTS:
-        raise ValueError("Journal cap must be 5000 or 10000")
-    command = [os.fspath(binary), "demo" if demo else "diagnose",
-               "--focus", focus, "--since", since,
-               "--max-events", str(max_events), "--format", "json",
-               "--no-progress"]
-    if current_boot and not demo:
-        command.append("--current-boot")
-    if disk_details and not demo:
-        command.append("--disk-details")
-    if include_remote_mounts and not demo:
-        command.append("--include-remote-mounts")
-    return command
-
+        raise ValueError("Invalid journal limit")
+    cmd = [os.fspath(binary), "demo" if demo else "diagnose",
+           "--focus", focus, "--since", since, "--max-events", str(max_events),
+           "--format", "json", "--no-progress"]
+    if current_boot and not demo: cmd.append("--current-boot")
+    if disk_details and not demo: cmd.append("--disk-details")
+    if include_remote_mounts and not demo: cmd.append("--include-remote-mounts")
+    return cmd
 
 def parse_report(raw):
-    """Reject invalid or incompatible reports rather than misleading the UI."""
     if isinstance(raw, bytes):
-        if len(raw) > MAX_REPORT_BYTES:
-            raise ValueError("Diagnostic report exceeds 8 MiB")
+        if len(raw) > MAX_REPORT_BYTES: raise ValueError("Report exceeds 8 MiB")
         raw = raw.decode("utf-8")
     elif len(raw.encode("utf-8")) > MAX_REPORT_BYTES:
-        raise ValueError("Diagnostic report exceeds 8 MiB")
+        raise ValueError("Report exceeds 8 MiB")
     report = json.loads(raw)
     if not isinstance(report, dict) or report.get("schema_version") != 2:
         raise ValueError("Expected a WhyDown JSON schema v2 report")
-    if (not isinstance(report.get("findings"), list)
-            or not isinstance(report.get("timeline"), list)
-            or not isinstance(report.get("system"), dict)):
-        raise ValueError("Diagnostic report is missing required structured fields")
+    if not (isinstance(report.get("findings"), list) and
+            isinstance(report.get("timeline"), list) and
+            isinstance(report.get("system"), dict)):
+        raise ValueError("Report is missing structured fields")
     return report
-
 
 def headline(report):
     summary = report.get("summary") or {}
-    warnings = summary.get("warning_count", 0)
-    info = summary.get("info_count", 0)
-    count = report.get("journal_entries_examined", 0)
-    partial = "  |  PARTIAL journal window" if report.get("journal_truncated") else ""
-    return (f"{warnings} warning(s)  |  {info} informational finding(s)"
-            f"  |  {count} journal entries{partial}")
+    extra = " | PARTIAL" if report.get("journal_truncated") else ""
+    return (f"{summary.get('warning_count', 0)} warnings, "
+            f"{summary.get('info_count', 0)} info, "
+            f"{report.get('journal_entries_examined', 0)} events{extra}")
 
-
-def finding_details(finding):
-    lines = [
-        str(finding.get("title", "Finding")),
-        f"Severity: {finding.get('severity', 'unknown')}  |  "
-        f"Confidence: {finding.get('confidence', 'unknown')}  |  "
-        f"Scope: {finding.get('scope', 'unknown')}",
-        "",
-        str(finding.get("explanation", "")),
-        "",
-        "OBSERVED EVIDENCE",
-    ]
-    evidence = finding.get("evidence") or []
-    lines.extend(f"  - {item}" for item in evidence)
-    if not evidence:
-        lines.append("  No supporting evidence included.")
-    lines.extend(["", "SUGGESTED CHECKS (not executed)"])
-    checks = finding.get("checks") or []
-    lines.extend(f"  - {item}" for item in checks)
-    if not checks:
-        lines.append("  No specific check supplied.")
-    lines.extend(["", "Evidence does not by itself prove a root cause, "
-                  "recovery or application readiness."])
+def finding_details(f):
+    lines = [str(f.get("title", "Finding")), "",
+             f"SEVERITY: {f.get('severity', '?')}",
+             f"CONFIDENCE: {f.get('confidence', '?')}",
+             f"SCOPE: {f.get('scope', '?')}", "",
+             "EXPLANATION", str(f.get("explanation", "")), "",
+             "OBSERVED EVIDENCE"]
+    lines.extend(" • " + str(e) for e in (f.get("evidence") or []))
+    if not f.get("evidence"): lines.append(" No evidence supplied")
+    lines.extend(["", "SUGGESTED READ-ONLY CHECKS"])
+    lines.extend(" • " + str(c) for c in (f.get("checks") or []))
+    if not f.get("checks"): lines.append(" No specific check supplied")
+    lines.extend(["", "Observations are not proof of root cause or application readiness."])
     return "\n".join(lines)
 
-
-def coverage_details(report):
-    system = report.get("system") or {}
-    lines = [
-        "COLLECTION COVERAGE AND LIMITATIONS",
-        "",
-        f"Journal collected: {report.get('journal_checked', False)}",
-        f"Journal entries examined: {report.get('journal_entries_examined', 0)}",
-        f"Journal window partial: {report.get('journal_truncated', False)}",
-        f"Current-boot journal scope: {report.get('journal_current_boot_only', False)}",
-        f"Systemd system manager checked: {system.get('system_units_checked', False)}",
-        f"Filesystem capacity collected: {system.get('disk_usage_checked', False)}",
-        "",
-        "CURRENT SYSTEMD SERVICE SNAPSHOTS",
-    ]
-    statuses = system.get("service_statuses") or []
-    if not statuses:
-        lines.append("  No targeted service-state snapshot was available.")
-    for status in statuses[:20]:
-        lines.append(
-            f"  {status.get('unit', '?')}: {status.get('active_state', '?')}/"
-            f"{status.get('sub_state', '?')}; result={status.get('result', '?')}; "
-            f"restarts={status.get('n_restarts', 'unknown')}")
-    lines.extend(["", "COLLECTION NOTES"])
-    notes = report.get("collection_notes") or []
-    if notes:
-        lines.extend(f"  - {note}" for note in notes[:80])
-    else:
-        lines.append("  No additional collector notes.")
-    if report.get("journal_truncated"):
-        lines.extend(["", "A partial journal window may omit older incidents. "
-                      "Choose a shorter time range or inspect more entries."])
-    lines.extend(["", "WhyDown does not test Internet connectivity or guarantee "
-                  "that an active service is application-ready."])
+def coverage_details(r):
+    sysinfo = r.get("system") or {}
+    lines = ["COLLECTION COVERAGE AND LIMITATIONS", "",
+             f"Journal collected: {r.get('journal_checked', False)}",
+             f"Journal entries examined: {r.get('journal_entries_examined', 0)}",
+             f"Journal window partial: {r.get('journal_truncated', False)}",
+             f"Current boot only: {r.get('journal_current_boot_only', False)}",
+             f"Systemd checked: {sysinfo.get('system_units_checked', False)}",
+             f"Disk usage checked: {sysinfo.get('disk_usage_checked', False)}",
+             "", "CURRENT SERVICE SNAPSHOTS"]
+    for v in (sysinfo.get("service_statuses") or [])[:20]:
+        lines.append(f" • {v.get('unit', '?')}: {v.get('active_state', '?')}/"
+                     f"{v.get('sub_state', '?')}; result={v.get('result', '?')}")
+    lines.extend(["", "COLLECTOR LIMITATIONS"])
+    notes = r.get("collection_notes") or []
+    lines.extend(" • " + str(e) for e in notes[:80])
+    if not notes: lines.append(" No additional notes")
+    if r.get("journal_truncated"):
+        lines.extend(["", "Journal partial: reduce lookback or inspect more entries."])
+    lines.extend(["", "Active services and associated Wi-Fi do not prove connectivity."])
     return "\n".join(lines)
-
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="WhyDown local desktop GUI")
+    parser = argparse.ArgumentParser(description="WhyDown Qt6 GUI")
     parser.add_argument("--whydown-bin", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--focus", choices=FOCUSES, default="all")
@@ -159,455 +162,404 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-class WhyDownGUI:
-    def __init__(self, root, args):
-        self.root = root
-        self.binary = args.whydown_bin
-        self.demo = args.demo
-        self.report = None
-        self.raw_report = None
-        self.worker = None
-        self.process = None
-        self.messages = queue.Queue()
-        self.context_menus = []
-        root.title("WhyDown - Linux diagnostics")
-        root.geometry("1060x700")
-        root.minsize(800, 540)
-
-        self.focus = tk.StringVar(value=args.focus)
-        self.since = tk.StringVar(value=args.since)
-        self.max_events = tk.StringVar(value=str(args.max_events))
-        self.current_boot = tk.BooleanVar(value=args.current_boot)
-        self.disk_details = tk.BooleanVar(value=args.disk_details)
-        self.include_remote_mounts = tk.BooleanVar(value=args.include_remote_mounts)
-        self.status = tk.StringVar(
-            value="Ready: click Analyze this computer to collect evidence."
-                  if not self.demo else
-                  "Sample mode: click Explore sample report. No system data is read.")
-        self.summary = tk.StringVar(value="No analysis yet. Start with the blue button above.")
-
-        style = ttk.Style(root)
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        style.configure("Title.TLabel", font=("sans-serif", 19, "bold"))
-        style.configure("Subtitle.TLabel", font=("sans-serif", 10))
-        style.configure("Action.TButton", font=("sans-serif", 11, "bold"), padding=(15, 9))
-        style.configure("Summary.TLabel", font=("sans-serif", 11, "bold"))
-        style.configure("Treeview", rowheight=26)
-
-        shell = ttk.Frame(root, padding=16)
-        shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="WhyDown", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
-            shell, style="Subtitle.TLabel",
-            text="1. Choose scope (optional)     2. Analyze     3. See findings and evidence automatically"
-        ).pack(anchor="w", pady=(0, 12))
-
-        options = ttk.LabelFrame(shell, text="Diagnostic settings - All checks recommended", padding=10)
-        options.pack(fill="x")
-        ttk.Label(options, text="Focus").grid(row=0, column=0, sticky="w")
-        self.focus_box = ttk.Combobox(options, textvariable=self.focus,
-                                      values=FOCUSES, state="readonly", width=12)
-        self.focus_box.grid(row=1, column=0, padx=(0, 12), pady=(3, 0))
-        ttk.Label(options, text="Journal lookback").grid(row=0, column=1, sticky="w")
-        self.since_box = ttk.Combobox(options, textvariable=self.since,
-                                      values=(LOOKBACKS if args.since in LOOKBACKS
-                                              else LOOKBACKS + (args.since,)),
-                                      state="readonly", width=10)
-        self.since_box.grid(row=1, column=1, padx=(0, 12), pady=(3, 0))
-        ttk.Label(options, text="Journal limit").grid(row=0, column=2, sticky="w")
-        self.cap_box = ttk.Combobox(options, textvariable=self.max_events,
-                                    values=MAX_EVENTS, state="readonly", width=10)
-        self.cap_box.grid(row=1, column=2, padx=(0, 12), pady=(3, 0))
-        self.boot_check = ttk.Checkbutton(options, text="Current boot only",
-                                          variable=self.current_boot)
-        self.boot_check.grid(row=1, column=3, padx=(0, 12), sticky="w")
-        self.analyze_button = ttk.Button(
-            options, style="Action.TButton",
-            text="Explore sample report" if self.demo else "Analyze this computer",
-            command=self.analyze)
-        self.analyze_button.grid(row=1, column=4, padx=8, sticky="e")
-        options.columnconfigure(4, weight=1)
-        advanced = ttk.Frame(options)
-        advanced.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
-        self.disk_check = ttk.Checkbutton(
-            advanced, text="Detailed disk usage (may be slow)", variable=self.disk_details)
-        self.disk_check.pack(side="left", padx=(0, 18))
-        self.remote_check = ttk.Checkbutton(
-            advanced, text="Include remote mounts (may block)", variable=self.include_remote_mounts)
-        self.remote_check.pack(side="left")
-
-        line = ttk.Frame(shell)
-        line.pack(fill="x", pady=(10, 8))
-        ttk.Label(line, textvariable=self.status, wraplength=780).pack(side="left", fill="x", expand=True)
-        self.progress = ttk.Progressbar(line, mode="indeterminate", length=130)
-        self.progress.pack(side="right")
-        ttk.Label(shell, textvariable=self.summary, style="Summary.TLabel",
-                  wraplength=980).pack(anchor="w", pady=(2, 9))
-
-        self.tabs = ttk.Notebook(shell)
-        self.tabs.pack(fill="both", expand=True)
-        findings = ttk.Frame(self.tabs)
-        timeline = ttk.Frame(self.tabs)
-        coverage = ttk.Frame(self.tabs)
-        self.tabs.add(findings, text="Findings & evidence")
-        self.tabs.add(timeline, text="Timeline")
-        self.tabs.add(coverage, text="Coverage & limits")
-
-        pane = ttk.Panedwindow(findings, orient="horizontal")
-        pane.pack(fill="both", expand=True, pady=5)
-        left = ttk.Frame(pane)
-        right = ttk.Frame(pane)
-        pane.add(left, weight=2)
-        pane.add(right, weight=3)
-        self.finding_tree = ttk.Treeview(left, columns=("severity", "scope"),
-                                          show="tree headings", selectmode="browse")
-        self.finding_tree.heading("#0", text="Finding")
-        self.finding_tree.heading("severity", text="Severity")
-        self.finding_tree.heading("scope", text="Scope")
-        self.finding_tree.column("#0", minwidth=190, width=250)
-        self.finding_tree.column("severity", minwidth=65, width=85, stretch=False)
-        self.finding_tree.column("scope", minwidth=115, width=145)
-        self.finding_tree.pack(fill="both", expand=True, side="left")
-        scroll = ttk.Scrollbar(left, orient="vertical", command=self.finding_tree.yview)
-        scroll.pack(side="right", fill="y")
-        self.finding_tree.configure(yscrollcommand=scroll.set)
-        self.finding_tree.bind("<<TreeviewSelect>>", self.select_finding)
-        self.configure_tree_copy(self.finding_tree)
-        self.detail = self.text_area(right)
-        self.configure_text_copy(self.detail)
-
-        self.event_tree = ttk.Treeview(timeline,
-                                        columns=("time", "event", "subject", "source"),
-                                        show="headings")
-        for name, label, width in (
-            ("time", "Time (UTC)", 180), ("event", "Event", 330),
-            ("subject", "Subject", 180), ("source", "Source", 130)):
-            self.event_tree.heading(name, text=label)
-            self.event_tree.column(name, width=width, minwidth=90)
-        self.event_tree.pack(side="left", fill="both", expand=True, pady=5)
-        event_scroll = ttk.Scrollbar(timeline, orient="vertical", command=self.event_tree.yview)
-        event_scroll.pack(side="right", fill="y")
-        self.event_tree.configure(yscrollcommand=event_scroll.set)
-        self.configure_tree_copy(self.event_tree)
-        self.coverage = self.text_area(coverage)
-        self.configure_text_copy(self.coverage)
-
-        ttk.Label(
-            shell,
-            text="Select a passage with the mouse, then press Ctrl+C, right-click "
-                 "to Copy, or use Copy selection. Timeline entries copy as rows.",
-            style="Subtitle.TLabel",
-            wraplength=980,
-        ).pack(anchor="w", pady=(9, 0))
-
-        footer = ttk.Frame(shell)
-        footer.pack(fill="x", pady=(10, 0))
-        self.save_button = ttk.Button(footer, text="Save private JSON report...",
-                                      command=self.save_json, state="disabled")
-        self.save_button.pack(side="left")
-        self.copy_button = ttk.Button(
-            footer, text="Copy selection", command=self.copy_active_selection)
-        self.copy_button.pack(side="left", padx=(10, 0))
-        ttk.Label(footer, text="Read-only | Offline | Copy only on request",
-                  style="Subtitle.TLabel").pack(side="left", padx=15)
-        ttk.Button(footer, text="Close", command=self.close).pack(side="right")
-        self.write_text(self.detail, "Start an analysis to view findings automatically.")
-        self.write_text(self.coverage, "Collection coverage will appear after analysis.")
-        root.protocol("WM_DELETE_WINDOW", self.close)
-        root.after(120, self.poll_results)
+class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
+    """Qt widgets are modern-looking but all evidence fields are native/selectable."""
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+        self.report = self.raw_report = None
+        self.running = False
+        self.out = bytearray()
+        self.err = bytearray()
+        self.setWindowTitle("WhyDown  |  Linux system diagnostics")
+        self.setMinimumSize(980, 640)
+        self.resize(1250, 810)
+        self.setStyleSheet(STYLE)
+        self._ui()
+        self.process = QtCore.QProcess(self)
+        self.process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.SeparateChannels)
+        self.process.readyReadStandardOutput.connect(self._stdout)
+        self.process.readyReadStandardError.connect(self._stderr)
+        self.process.finished.connect(self._finished)
+        self.process.errorOccurred.connect(self._process_error)
+        self.timer = QtCore.QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(lambda: self._abort("Diagnostic timeout (240s)."))
 
     @staticmethod
-    def text_area(parent):
-        box = ttk.Frame(parent)
-        box.pack(fill="both", expand=True)
-        text = tk.Text(box, wrap="word", state="disabled", font=("monospace", 10),
-                       relief="flat", borderwidth=8, exportselection=False)
-        text.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(box, orient="vertical", command=text.yview)
-        scrollbar.pack(side="right", fill="y")
-        text.configure(yscrollcommand=scrollbar.set)
+    def card():
+        c = QtWidgets.QFrame()
+        c.setObjectName("Card")
+        return c
+
+    @staticmethod
+    def label(text, role):
+        l = QtWidgets.QLabel(text)
+        l.setObjectName(role)
+        return l
+
+    @staticmethod
+    def readonly_text(placeholder):
+        text = QtWidgets.QPlainTextEdit()
+        text.setReadOnly(True)
+        text.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse |
+            QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        text.setPlainText(placeholder)
         return text
 
     @staticmethod
-    def write_text(widget, value):
-        widget.configure(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("1.0", value)
-        widget.configure(state="disabled")
+    def dropdown(group, title, items, default):
+        v = QtWidgets.QVBoxLayout()
+        v.addWidget(WhyDownGUI.label(title, "Muted"))
+        combo = QtWidgets.QComboBox()
+        combo.addItems(items)
+        combo.setCurrentText(default)
+        v.addWidget(combo)
+        group.addLayout(v)
+        return combo
 
-    def configure_text_copy(self, widget):
-        """Enable explicit partial text selection/copy on read-only details."""
-        menu = tk.Menu(self.root, tearoff=False)
-        menu.add_command(
-            label="Copy selected text",
-            command=lambda w=widget: self.copy_text_selection(w))
-        menu.add_command(
-            label="Select all text",
-            command=lambda w=widget: self.select_all_text(w))
-        self.context_menus.append(menu)
-        widget.bind("<Control-c>", self.on_copy_text)
-        widget.bind("<Control-C>", self.on_copy_text)
-        widget.bind("<Control-Insert>", self.on_copy_text)
-        widget.bind("<Control-a>", self.on_select_all_text)
-        widget.bind("<Control-A>", self.on_select_all_text)
-        widget.bind("<Button-3>", lambda event, m=menu: self.popup_menu(event, m))
+    def _ui(self):
+        root = QtWidgets.QWidget()
+        root.setObjectName("Root")
+        self.setCentralWidget(root)
+        row = QtWidgets.QHBoxLayout(root)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
 
-    def configure_tree_copy(self, tree):
-        """Treeviews select rows, not individual characters inside cells."""
-        menu = tk.Menu(self.root, tearoff=False)
-        menu.add_command(
-            label="Copy selected row(s)",
-            command=lambda w=tree: self.copy_tree_selection(w))
-        self.context_menus.append(menu)
-        tree.bind("<Control-c>", lambda event, w=tree: self.on_copy_tree(event, w))
-        tree.bind("<Control-C>", lambda event, w=tree: self.on_copy_tree(event, w))
-        tree.bind("<Control-Insert>", lambda event, w=tree: self.on_copy_tree(event, w))
-        tree.bind(
-            "<Button-3>",
-            lambda event, w=tree, m=menu: self.tree_context(event, w, m))
+        sidebar = QtWidgets.QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(220)
+        nav = QtWidgets.QVBoxLayout(sidebar)
+        nav.setContentsMargins(22, 30, 22, 24)
+        nav.setSpacing(9)
+        nav.addWidget(self.label("●  WhyDown", "Brand"))
+        nav.addWidget(self.label("LOCAL SYSTEM DIAGNOSTICS", "SideCaption"))
+        nav.addSpacing(46)
+        nav.addWidget(self.label("WORKSPACE", "SideCaption"))
+        self.navbuttons = []
+        for n, name in enumerate(("◉  Findings", "◷  Timeline", "▤  Coverage")):
+            btn = QtWidgets.QPushButton(name)
+            btn.setObjectName("Nav")
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda checked=False, i=n: self.tabs.setCurrentIndex(i))
+            nav.addWidget(btn)
+            self.navbuttons.append(btn)
+        nav.addStretch()
+        nav.addWidget(self.label("●  OFFLINE · READ-ONLY\n\nNo telemetry. No repairs.", "SideCaption"))
+        row.addWidget(sidebar)
 
-    @staticmethod
-    def popup_menu(event, menu):
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-        return "break"
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        row.addWidget(scroll, 1)
+        body = QtWidgets.QWidget()
+        body.setObjectName("Root")
+        scroll.setWidget(body)
+        main = QtWidgets.QVBoxLayout(body)
+        main.setContentsMargins(29, 27, 29, 22)
+        main.setSpacing(14)
 
-    def tree_context(self, event, tree, menu):
-        row = tree.identify_row(event.y)
-        if row and row not in tree.selection():
-            tree.selection_set(row)
-        return self.popup_menu(event, menu)
+        header = QtWidgets.QHBoxLayout()
+        headings = QtWidgets.QVBoxLayout()
+        headings.addWidget(self.label("System diagnostics", "Title"))
+        headings.addWidget(self.label("Understand what happened, backed by local evidence.", "Muted"))
+        header.addLayout(headings)
+        header.addStretch()
+        header.addWidget(self.label("●  PRIVATE & LOCAL", "Pill"))
+        main.addLayout(header)
 
-    @staticmethod
-    def selected_text(widget):
-        """Return only the highlighted characters, not the complete report."""
-        indices = widget.tag_ranges("sel")
-        if len(indices) != 2:
-            return ""
-        return widget.get(indices[0], indices[1])
+        form = self.card()
+        fl = QtWidgets.QVBoxLayout(form)
+        fl.setContentsMargins(18, 17, 18, 17)
+        fl.addWidget(self.label("01   Configure & analyze", "CardTitle"))
+        opts = QtWidgets.QHBoxLayout()
+        opts.setSpacing(15)
+        self.focus = self.dropdown(opts, "FOCUS", FOCUSES, self.args.focus)
+        ranges = list(LOOKBACKS)
+        if self.args.since not in ranges: ranges.append(self.args.since)
+        self.since = self.dropdown(opts, "LOOKBACK", ranges, self.args.since)
+        self.cap = self.dropdown(opts, "MAX EVENTS", MAX_EVENTS, str(self.args.max_events))
+        self.boot = QtWidgets.QCheckBox("Current boot only")
+        self.boot.setChecked(self.args.current_boot)
+        opts.addWidget(self.boot)
+        opts.addStretch(1)
+        self.analyze_button = QtWidgets.QPushButton(
+            "Explore sample" if self.args.demo else "Run diagnostics")
+        self.analyze_button.setObjectName("Primary")
+        self.analyze_button.clicked.connect(self.analyze)
+        opts.addWidget(self.analyze_button)
+        fl.addLayout(opts)
+        advanced = QtWidgets.QHBoxLayout()
+        self.disk = QtWidgets.QCheckBox("Detailed disk usage (slower)")
+        self.disk.setChecked(self.args.disk_details)
+        self.remote = QtWidgets.QCheckBox("Include remote mounts (may block)")
+        self.remote.setChecked(self.args.include_remote_mounts)
+        advanced.addWidget(self.disk)
+        advanced.addWidget(self.remote)
+        advanced.addStretch()
+        fl.addLayout(advanced)
+        main.addWidget(form)
 
-    @staticmethod
-    def selected_rows(tree):
-        """Copy only explicitly selected visible tree entries."""
-        lines = []
-        for item in tree.selection():
-            label = str(tree.item(item, "text"))
-            values = [str(value) for value in tree.item(item, "values")]
-            cells = ([label] if label else []) + values
-            if cells:
-                lines.append("\t".join(cells))
-        return "\n".join(lines)
+        strip = QtWidgets.QHBoxLayout()
+        strip.setSpacing(14)
+        self.metrics = {}
+        for key, name, subtitle in (("warnings", "WARNINGS", "Need investigation"),
+                                     ("info", "OBSERVATIONS", "Informational signals"),
+                                     ("events", "JOURNAL ENTRIES", "Scoped evidence")):
+            card = self.card()
+            v = QtWidgets.QVBoxLayout(card)
+            v.setContentsMargins(16, 12, 16, 12)
+            v.addWidget(self.label(name, "CardCaption"))
+            value = self.label("—", "CardValue")
+            self.metrics[key] = value
+            v.addWidget(value)
+            v.addWidget(self.label(subtitle, "CardCaption"))
+            strip.addWidget(card, 1)
+        main.addLayout(strip)
+        summary = QtWidgets.QHBoxLayout()
+        summary.addWidget(self.label("02   Results & evidence", "CardTitle"))
+        summary.addStretch()
+        summary.addWidget(self.label("Drag to select text, then Ctrl+C or Copy selection", "Muted"))
+        main.addLayout(summary)
 
-    def copy_to_clipboard(self, value):
-        if not value:
-            self.status.set("Select some text or a result row before copying.")
-            return False
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(value)
-            self.root.update_idletasks()
-        except tk.TclError:
-            self.status.set("Could not access the desktop clipboard.")
-            return False
-        self.status.set(f"Copied {len(value)} character(s) to the clipboard.")
-        return True
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.currentChanged.connect(self._navigate)
+        main.addWidget(self.tabs, 1)
+        self.tabs.setMinimumHeight(265)
+        finds = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(finds)
+        layout.setContentsMargins(5, 5, 5, 5)
+        split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.findings = QtWidgets.QTreeWidget()
+        self.findings.setHeaderLabels(["Finding", "Severity"])
+        self.findings.setRootIsDecorated(False)
+        self.findings.setAlternatingRowColors(True)
+        self.findings.currentItemChanged.connect(self._finding_changed)
+        split.addWidget(self.findings)
+        self.detail = self.readonly_text("Start an analysis to review the evidence.")
+        split.addWidget(self.detail)
+        split.setSizes([280, 630])
+        layout.addWidget(split)
+        self.tabs.addTab(finds, "Findings & evidence")
 
-    def copy_text_selection(self, widget):
-        return self.copy_to_clipboard(self.selected_text(widget))
+        timeline = QtWidgets.QWidget()
+        lv = QtWidgets.QVBoxLayout(timeline)
+        lv.setContentsMargins(5, 5, 5, 5)
+        self.events = QtWidgets.QTreeWidget()
+        self.events.setHeaderLabels(["Time (UTC)", "Event", "Subject", "Source"])
+        self.events.setRootIsDecorated(False)
+        self.events.setAlternatingRowColors(True)
+        self.events.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        lv.addWidget(self.events)
+        self.tabs.addTab(timeline, "Event timeline")
 
-    def copy_tree_selection(self, tree):
-        return self.copy_to_clipboard(self.selected_rows(tree))
+        covered = QtWidgets.QWidget()
+        cv = QtWidgets.QVBoxLayout(covered)
+        cv.setContentsMargins(5, 5, 5, 5)
+        self.coverage = self.readonly_text("Collection limits will appear after analysis.")
+        cv.addWidget(self.coverage)
+        self.tabs.addTab(covered, "Coverage & limits")
+        self._navigate(0)
 
-    @staticmethod
-    def select_all_text(widget):
-        widget.tag_add("sel", "1.0", "end-1c")
-        widget.focus_set()
-        return "break"
+        footer = QtWidgets.QHBoxLayout()
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setFixedWidth(100)
+        self.progress.hide()
+        footer.addWidget(self.progress)
+        self.status = self.label("Ready. Run diagnostics to get started.", "Muted")
+        footer.addWidget(self.status, 1)
+        self.copy_button = QtWidgets.QPushButton("Copy selection")
+        self.copy_button.setObjectName("Secondary")
+        self.copy_button.clicked.connect(self.copy_selection)
+        footer.addWidget(self.copy_button)
+        self.save_button = QtWidgets.QPushButton("Export JSON…")
+        self.save_button.setObjectName("Secondary")
+        self.save_button.setEnabled(False)
+        self.save_button.clicked.connect(self.export_json)
+        footer.addWidget(self.save_button)
+        main.addLayout(footer)
 
-    def on_select_all_text(self, event):
-        return self.select_all_text(event.widget)
-
-    def on_copy_text(self, event):
-        self.copy_text_selection(event.widget)
-        return "break"
-
-    def on_copy_tree(self, _event, tree):
-        self.copy_tree_selection(tree)
-        return "break"
-
-    def copy_active_selection(self):
-        """Copy the highlighted text/row in the currently visible results tab."""
-        current_tab = self.tabs.tab(self.tabs.select(), "text")
-        if current_tab == "Coverage & limits":
-            return self.copy_text_selection(self.coverage)
-        if current_tab == "Timeline":
-            return self.copy_tree_selection(self.event_tree)
-        text = self.selected_text(self.detail)
-        if text:
-            return self.copy_to_clipboard(text)
-        return self.copy_tree_selection(self.finding_tree)
+    def _navigate(self, index):
+        for i, button in enumerate(self.navbuttons):
+            button.setChecked(i == index)
 
     def analyze(self):
-        if self.worker is not None and self.worker.is_alive():
+        if self.running: return
+        try:
+            cmd = build_command(
+                self.args.whydown_bin, demo=self.args.demo,
+                focus=self.focus.currentText(), since=self.since.currentText(),
+                max_events=int(self.cap.currentText()), current_boot=self.boot.isChecked(),
+                disk_details=self.disk.isChecked(), include_remote_mounts=self.remote.isChecked())
+        except ValueError as err:
+            QtWidgets.QMessageBox.warning(self, "Invalid scope", str(err))
             return
         self.report = self.raw_report = None
-        self.save_button.configure(state="disabled")
-        self.analyze_button.configure(state="disabled")
-        for widget in (self.focus_box, self.since_box, self.cap_box,
-                       self.boot_check, self.disk_check, self.remote_check):
-            widget.configure(state="disabled")
-        self.progress.start(12)
-        self.status.set("Collecting evidence locally... You can keep using your desktop.")
-        self.summary.set("Analyzing... No changes are being made to the system.")
-        cmd = build_command(
-            self.binary, demo=self.demo, focus=self.focus.get(), since=self.since.get(),
-            max_events=int(self.max_events.get()), current_boot=self.current_boot.get(),
-            disk_details=self.disk_details.get(),
-            include_remote_mounts=self.include_remote_mounts.get())
-        self.worker = threading.Thread(target=self.collect, args=(cmd,), daemon=True)
-        self.worker.start()
+        self.out = bytearray()
+        self.err = bytearray()
+        self.running = True
+        self.analyze_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+        self.progress.show()
+        self.status.setText("Collecting local evidence…")
+        self.process.start(cmd[0], cmd[1:])
+        self.timer.start(240_000)
 
-    def collect(self, cmd):
-        try:
-            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE)
-            output, errors = self.process.communicate(timeout=240)
-            if len(output) > MAX_REPORT_BYTES:
-                raise ValueError("Diagnostic report exceeds 8 MiB")
-            if self.process.returncode != 0:
-                raise RuntimeError(
-                    f"WhyDown exited with code {self.process.returncode}: "
-                    f"{errors.decode('utf-8', errors='replace')[:1500]}")
-            report = parse_report(output)
-            self.messages.put(("ok", (report, output)))
-        except (OSError, ValueError, RuntimeError, UnicodeError, json.JSONDecodeError,
-                subprocess.TimeoutExpired) as error:
-            if self.process and self.process.poll() is None:
-                self.process.kill()
-                self.process.communicate()
-            self.messages.put(("error", str(error)))
-        finally:
-            self.process = None
+    def _stdout(self):
+        self.out.extend(bytes(self.process.readAllStandardOutput()))
+        if len(self.out) > MAX_REPORT_BYTES:
+            self._abort("Diagnostic report exceeded the 8 MiB safety limit.")
 
-    def poll_results(self):
-        try:
-            while True:
-                kind, payload = self.messages.get_nowait()
-                self.progress.stop()
-                self.analyze_button.configure(state="normal")
-                for widget in (self.focus_box, self.since_box, self.cap_box,
-                               self.boot_check, self.disk_check, self.remote_check):
-                    widget.configure(
-                        state="readonly" if widget in
-                        (self.focus_box, self.since_box, self.cap_box) else "normal")
-                if kind == "ok":
-                    self.report, self.raw_report = payload
-                    self.show_report()
-                else:
-                    self.status.set("Analysis failed. Check the error details.")
-                    self.summary.set("No results available; existing Linux state was not changed.")
-                    messagebox.showerror("WhyDown diagnostic", payload)
-        except queue.Empty:
-            pass
-        self.root.after(120, self.poll_results)
-
-    def show_report(self):
-        report = self.report
-        self.summary.set(headline(report))
-        partial = report.get("journal_truncated", False)
-        self.status.set(
-            "Analysis complete. Your findings are shown below. Click one to inspect evidence."
-            + (" Journal window partial: shorten the lookback if needed." if partial else ""))
-        self.finding_tree.delete(*self.finding_tree.get_children())
-        findings = report.get("findings") or []
-        for number, finding in enumerate(findings):
-            self.finding_tree.insert("", "end", iid=f"finding-{number}",
-                                     text=str(finding.get("title", "Finding")),
-                                     values=(str(finding.get("severity", "")),
-                                             str(finding.get("scope", ""))))
-        if findings:
-            self.finding_tree.selection_set("finding-0")
-            self.finding_tree.focus("finding-0")
-            self.finding_tree.see("finding-0")
-            self.write_text(self.detail, finding_details(findings[0]))
+    def _stderr(self):
+        if len(self.err) < 4096:
+            self.err.extend(bytes(self.process.readAllStandardError())[:4096-len(self.err)])
         else:
-            self.write_text(self.detail, "No classified findings in the collected evidence.\n"
-                            "This is NOT a guarantee that the system is healthy.")
-        self.event_tree.delete(*self.event_tree.get_children())
-        for event in reversed((report.get("timeline") or [])[-300:]):
-            self.event_tree.insert("", "end", values=(
-                str(event.get("timestamp", "")),
-                str(event.get("label", event.get("kind", ""))),
-                str(event.get("subject") or ""),
-                str(event.get("source") or "")))
-        self.write_text(self.coverage, coverage_details(report))
-        self.tabs.select(0)
-        self.save_button.configure(state="normal")
+            self.process.readAllStandardError()
 
-    def select_finding(self, _event):
-        if self.report is None:
-            return
-        selected = self.finding_tree.selection()
-        if not selected:
+    def _abort(self, why):
+        if not self.running: return
+        self.running = False
+        self.timer.stop()
+        if self.process.state() != QtCore.QProcess.ProcessState.NotRunning:
+            self.process.kill()
+        self.analyze_button.setEnabled(True)
+        self.progress.hide()
+        self.status.setText(why)
+        QtWidgets.QMessageBox.warning(self, "Diagnostic unavailable", why)
+
+    def _process_error(self, error):
+        if self.running and error == QtCore.QProcess.ProcessError.FailedToStart:
+            self._abort("Cannot start WhyDown diagnostic executable.")
+
+    def _finished(self, code, status):
+        self._stdout()
+        self._stderr()
+        if not self.running: return
+        self.running = False
+        self.timer.stop()
+        self.analyze_button.setEnabled(True)
+        self.progress.hide()
+        if code or status != QtCore.QProcess.ExitStatus.NormalExit:
+            self.status.setText("Diagnostic failed; no report was saved.")
+            QtWidgets.QMessageBox.warning(
+                self, "Diagnostic failed",
+                f"WhyDown exit {code}: {self.err.decode('utf-8', errors='replace')[:500]}")
             return
         try:
-            index = int(selected[0].split("-")[-1])
-            finding = self.report["findings"][index]
-        except (ValueError, IndexError, KeyError):
+            self.report = parse_report(bytes(self.out))
+        except (ValueError, UnicodeError, json.JSONDecodeError) as err:
+            self.status.setText(f"Cannot parse report: {err}")
             return
-        self.write_text(self.detail, finding_details(finding))
+        self.raw_report = bytes(self.out)
+        self._show_report()
 
-    def save_json(self):
-        if self.raw_report is None:
-            return
-        path = filedialog.asksaveasfilename(
-            title="Save the analyzed report (private JSON)",
-            defaultextension=".json",
-            filetypes=[("JSON report", "*.json")],
-            initialfile="whydown-report.json")
-        if not path:
-            return
+    def _show_report(self):
+        r = self.report
+        summary = r.get("summary") or {}
+        self.metrics["warnings"].setText(str(summary.get("warning_count", 0)))
+        self.metrics["info"].setText(str(summary.get("info_count", 0)))
+        self.metrics["events"].setText(str(r.get("journal_entries_examined", 0)))
+        self.findings.clear()
+        for i, finding in enumerate(r["findings"]):
+            item = QtWidgets.QTreeWidgetItem([
+                str(finding.get("title", "Finding")),
+                str(finding.get("severity", ""))])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, i)
+            if finding.get("severity") == "warning":
+                item.setForeground(1, QtGui.QBrush(QtGui.QColor("#b85f28")))
+            self.findings.addTopLevelItem(item)
+        if r["findings"]:
+            self.findings.setCurrentItem(self.findings.topLevelItem(0))
+        else:
+            self.detail.setPlainText("No classified findings. Not a health guarantee.")
+        self.events.clear()
+        for e in reversed(r["timeline"][-300:]):
+            item = QtWidgets.QTreeWidgetItem([
+                str(e.get("timestamp", "")),
+                str(e.get("label", e.get("kind", ""))),
+                str(e.get("subject") or ""), str(e.get("source") or "")])
+            self.events.addTopLevelItem(item)
+        for i in range(4): self.events.resizeColumnToContents(i)
+        self.coverage.setPlainText(coverage_details(r))
+        self.tabs.setCurrentIndex(0)
+        self.save_button.setEnabled(True)
+        suffix = " · Partial journal window" if r.get("journal_truncated") else ""
+        self.status.setText("Analysis complete. Select and copy any evidence passage." + suffix)
+
+    def _finding_changed(self, current, previous):
+        del previous
+        if current is None or self.report is None: return
+        i = current.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if isinstance(i, int) and i < len(self.report["findings"]):
+            self.detail.setPlainText(finding_details(self.report["findings"][i]))
+
+    def copy_selection(self):
+        index = self.tabs.currentIndex()
+        if index != 1:
+            editor = self.detail if index == 0 else self.coverage
+            selected = editor.textCursor().selectedText().replace("\u2029", "\n")
+        else:
+            selected = "\n".join(
+                "\t".join(item.text(i) for i in range(4))
+                for item in self.events.selectedItems())
+        if not selected:
+            self.status.setText("Select a text passage or timeline row before copying.")
+            return False
+        QtWidgets.QApplication.clipboard().setText(selected)
+        self.status.setText(f"Copied {len(selected)} characters to clipboard.")
+        return True
+
+    def export_json(self):
+        if self.raw_report is None: return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save private JSON report", "whydown-report.json", "JSON (*.json)")
+        if not path: return
         created = False
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             created = True
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(self.raw_report)
-                handle.flush()
-                os.fsync(handle.fileno())
-            messagebox.showinfo("Saved", "Private report saved. Review local identifiers before sharing.")
-        except OSError as error:
+            with os.fdopen(fd, "wb") as out:
+                out.write(self.raw_report)
+                out.flush()
+                os.fsync(out.fileno())
+            self.status.setText("Private report saved; inspect before sharing.")
+        except OSError as err:
             if created:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-            messagebox.showerror("Cannot save", f"{error}\nExisting files are never overwritten.")
+                try: os.unlink(path)
+                except OSError: pass
+            QtWidgets.QMessageBox.warning(self, "Save failed",
+                                          f"{err}\nExisting files are never overwritten.")
 
-    def close(self):
-        if self.process is not None and self.process.poll() is None:
-            self.process.terminate()
-        self.root.destroy()
+    def closeEvent(self, event):
+        self.timer.stop()
+        if self.process.state() != QtCore.QProcess.ProcessState.NotRunning:
+            self.process.kill()
+            self.process.waitForFinished(1500)
+        super().closeEvent(event)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    if tk is None:
-        print("WhyDown GUI needs Python 3 and Tkinter. Install your distribution's "
-              "Python Tk package; on Manjaro, check 'python3 -m tkinter'.", file=sys.stderr)
+    if QtWidgets is None:
+        print("WhyDown Qt GUI requires Python 3 and PyQt6. "
+              "Manjaro: sudo pacman -S python python-pyqt6; "
+              "Debian/Ubuntu: sudo apt install python3 python3-pyqt6. "
+              "The terminal CLI/TUI do not require Qt.", file=sys.stderr)
         return 2
-    try:
-        root = tk.Tk()
-    except tk.TclError as error:
-        print("WhyDown GUI needs a running graphical desktop (X11/XWayland) and "
-              f"Python Tk support: {error}", file=sys.stderr)
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+            or os.environ.get("QT_QPA_PLATFORM")):
+        print("WhyDown Qt GUI needs a graphical desktop. Use whydown tui over SSH.",
+              file=sys.stderr)
         return 2
-    WhyDownGUI(root, args)
-    root.mainloop()
-    return 0
+    app = QtWidgets.QApplication(["WhyDown"])
+    app.setApplicationName("WhyDown")
+    app.setStyle("Fusion")
+    gui = WhyDownGUI(args)
+    gui.show()
+    return app.exec()
 
 
 if __name__ == "__main__":

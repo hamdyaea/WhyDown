@@ -86,7 +86,7 @@ class TestWhyDownGUI(unittest.TestCase):
         original = self.fixture()
         parsed = gui.parse_report(json.dumps(original).encode("utf-8"))
         self.assertEqual(parsed, original)
-        self.assertIn("1 warning(s)", gui.headline(parsed))
+        self.assertIn("1 warnings", gui.headline(parsed))
         self.assertIn("PARTIAL", gui.headline(parsed))
         details = gui.finding_details(parsed["findings"][0])
         self.assertIn("Systemd restart scheduled", details)
@@ -95,7 +95,7 @@ class TestWhyDownGUI(unittest.TestCase):
         coverage = gui.coverage_details(parsed)
         self.assertIn("lightdm.service", coverage)
         self.assertIn("Journal window partial: True", coverage)
-        self.assertIn("application-ready", coverage)
+        self.assertIn("connectivity", coverage)
 
     def test_report_validation_does_not_guess(self):
         for bad in ({}, {"schema_version": 4}, {"schema_version": 2, "system": {}}):

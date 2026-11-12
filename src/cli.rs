@@ -233,7 +233,7 @@ COMMANDS
   diagnose         Inspect the local Linux system (default)
   demo             Show a safe, deterministic example (no system inspection)
   tui              Guided terminal evidence browser (requires a terminal)
-  gui              Desktop GUI (Python 3 + Tkinter, no extra Rust crates)
+  gui              Modern Qt6 desktop GUI (Python 3 + PyQt6, optional)
   help             Show this help
   version          Show program version
 

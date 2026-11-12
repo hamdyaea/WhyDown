@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.10.0] - 2026-11-12
+
+### Qt 6 desktop redesign
+- Replace the old Tkinter GUI with a modern, responsive **Qt 6 (PyQt6)** desktop application: dark navigation sidebar, clearly differentiated cards and hierarchy, accessible controls, resizable finding/evidence panels, current observation metrics, and distinct timeline/coverage tabs.
+- Resolve the reported inability to select text with a mouse: use active, **read-only QPlainTextEdit** widgets with native mouse selection, Ctrl+C, contextual Copy, select-all and explicit Copy selection. No entire-report copying on empty selection.
+- Run the same Rust diagnostic engine asynchronously via bounded, local QProcess with no shell invocation, 8 MiB report limit and 240-second timeout. Keep focus=all/4h/current boot/10,000 as guided defaults.
+- Change optional desktop prerequisite from Python/Tkinter to Python **PyQt6**; installer detects the actual QtWidgets import and offers native package names for Manjaro/Arch, Debian 12/13, Ubuntu and Fedora. Never installs packages automatically.
+- Keep the CLI, headless TUI, report JSON schema v2, zero-third-party-Rust-crate design, read-only diagnostics and user opt-in private export unchanged.
+
+### Verification
+- Add a real Qt 6/Xvfb GUI smoke test exercising a fictional diagnostic, actual *mouse double-click text selection*, exact selection copying via native Ctrl+C and toolbar, coverage and timeline selection, and empty-selection protection.
+- Pure Python GUI-model tests, installer preflight tests, Rust unit and integration tests, Clippy and the Linux binary release matrix remain required.
+- On-host manual clipboard/Wayland integration on Manjaro and Debian still requires field validation after release.
+
 ## [0.9.2] - 2026-11-12
 
 ### Desktop usability

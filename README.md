@@ -5,12 +5,12 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.9.2 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.10.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
 - **Read-only by design:** diagnostics never restart services, change configuration, install packages, or escalate privileges. An optional `--desktop` installer flag creates a user-owned application shortcut only with explicit consent.
-- **Desktop GUI (v0.9.0):** `whydown gui` opens an offline graphical window with one prominent **Analyze this computer** button. Focus defaults to **all** (recommended); findings and evidence appear automatically after collection. Includes timeline, coverage, and an explicit private JSON export. The optional Python 3 + Tkinter dependency is only needed for GUI mode. See [GUI guide](docs/GUI.md).
+- **Modern Qt6 desktop GUI (v0.10.0):** `whydown gui` opens a polished offline PyQt6 application with a prominent **Run diagnostics** button. Focus defaults to **all** (recommended); findings and evidence appear automatically after collection. Includes timeline, coverage, and an explicit private JSON export. The optional Python 3 + PyQt6 dependency is only needed for GUI mode. See [GUI guide](docs/GUI.md).
 - **Guided terminal interface (v0.9.0 UX refinement):** run `whydown tui` for a number-and-Enter evidence browser with focus/lookback configuration, incident timeline, findings, current-unit snapshots, limitations and safe export guidance. `whydown tui --demo` does not read host data. Requires a real terminal; see [TUI guide](docs/TUI.md).
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
@@ -57,7 +57,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.9.2/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.10.0/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -214,7 +214,7 @@ whydown demo --format html --output example.html
 
 The demo shows **fictional** Wi-Fi disconnect, DHCP failure, DNS error and a failed service. It does not access system logs, network sockets or external services.
 
-### Desktop GUI (v0.9.0) — recommended on a Linux desktop
+### Modern Qt6 desktop GUI (v0.10.0) — recommended on a Linux desktop
 
 ```bash
 # Start a real local analysis using a window and one button
@@ -230,13 +230,21 @@ sh scripts/install.sh --desktop
 sh scripts/install.sh --check-gui-prereqs
 ```
 
-**How it works:** choose the scope if desired (**all** is preselected), click
-**Analyze this computer**, then inspect the already-open **Findings & evidence**
-tab. Select any part of an explanation or coverage result with the mouse and use **Ctrl+C**, **right-click → Copy selected text**, or the **Copy selection** button; timeline rows can also be copied. No menu sequence or terminal keyboard shortcuts are required. Results are
-produced by the same local read-only Rust engine; nothing is uploaded. JSON
-exports are saved only when explicitly selected. The GUI requires Python 3,
-Tkinter, and a graphical session (X11/XWayland). The installer verifies `python3` and `import tkinter` automatically after installing, and `--check-gui-prereqs` checks them independently without installing anything. If missing, it prints the appropriate package-manager command (for Manjaro: `sudo pacman -S python tk`); no packages are automatically installed. The CLI and TUI remain
-usable without them. See [desktop GUI guide](docs/GUI.md).
+**How it works:** select the scope if desired (**all** is preselected),
+click **Run diagnostics**, then inspect the automatically populated
+**Findings & evidence** tab. The new Qt6 interface has a dark navigation
+sidebar, readable summary cards and resizable results. Importantly,
+**you can now drag the mouse across an arbitrary passage to highlight it**
+in an enabled, read-only Qt text pane. Use **Ctrl+C**, the native right-click
+menu or **Copy selection** to copy *only that passage*. Timeline entries are
+copyable as rows; an empty selection never silently copies the whole report.
+
+The diagnostic engine remains offline and read-only. JSON exports require
+an explicit user action. The GUI requires Python 3 + **PyQt6**, available as
+`python-pyqt6` on Manjaro/Arch and `python3-pyqt6` on Debian/Ubuntu.
+The installer checks `from PyQt6.QtWidgets import QApplication` automatically,
+prints the distro-specific command if missing and never installs packages
+itself. CLI and TUI run without Qt. See the [Qt6 GUI guide](docs/GUI.md).
 
 ### Guided terminal browser (improved in v0.9.0)
 
@@ -279,7 +287,7 @@ Examples:
 # Diagnostic overview for the past day
 whydown diagnose
 
-# One-click desktop GUI (requires Python 3 and Tk on X11/XWayland)
+# Modern Qt6 desktop GUI (requires Python 3 and PyQt6 on a graphical desktop)
 whydown gui
 
 # Guided TUI for SSH or terminals (number + Enter)
@@ -518,7 +526,7 @@ whydown diagnose --since 24h --max-events 5000 --format json --output report.jso
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.9.2 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.10.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, `system.service_statuses`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -606,10 +614,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.9.0 (released):** optional offline Tkinter desktop GUI, embedded in the Rust binary and launched with `whydown gui`; focus **all** by default, one-click diagnostics, immediate findings/evidence, timeline and coverage tabs, safe opt-in JSON export, guided CLI/TUI defaults and clearer analyze-first terminal flow. `install.sh --desktop` can create an explicit opt-in application launcher. CI includes Python GUI model tests and an actual Tk window under Xvfb; real Manjaro desktop testing remains pending.
 - **v0.9.1 (released):** installer checks optional Python 3 and a working `tkinter` import, prints actionable distribution-specific package advice, warns if a new desktop shortcut cannot yet launch the GUI, and adds a standalone `--check-gui-prereqs` preflight. CLI/TUI installs stay valid without Python/Tk; no automatic package installation or privilege escalation. Dedicated installer smoke tests cover Python/Tk missing or available.
 - **v0.9.2 (released):** selectable GUI evidence/coverage text, context-menu copying, Ctrl+C/Ctrl+A shortcuts, a Copy selection button, and row copying from findings/timeline; clipboard use is explicit, scoped to selected content and never uploads or automatically saves reports. Real Xvfb smoke tests exercise partial copying and error handling.
+- **v0.10.0 (released):** replace the experimental Tkinter GUI with a modern Qt 6/PyQt6 desktop: dark sidebar, polished cards, clearer hierarchy, interactive finding/event views and native, mouse-selectable *read-only* evidence. Async bounded Qt process runs Rust diagnostics; private opt-in JSON export and offline rules remain unchanged. New real Qt6/Xvfb regression test exercises mouse double-click selection, Ctrl+C and exact clipboard contents; the installer checks PyQt6 on Arch/Manjaro, Debian/Ubuntu and Fedora.
 - **v0.10.0 (planned):** broader cross-distribution test fixtures, optional privacy-conscious evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.9.2: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.10.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 
