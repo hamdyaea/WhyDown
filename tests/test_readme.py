@@ -1,14 +1,14 @@
 """Smoke checks for the concise project README and its screenshot.
 
-The screenshot is a real WhyDown GUI captured with the fictional demo:
-it must be a committed JPEG, not an external link or developer placeholder.
+The screenshot is the real WhyDown Qt6 GUI supplied by the user:
+it must be a committed PNG, not an external link or placeholder.
 """
 import pathlib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
-IMAGE = ROOT / "docs/images/whydown-gui-dark.jpg"
+IMAGE = ROOT / "docs/images/whydown-gui-with-logo.png"
 
 
 class ReadmeQuickStartTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class ReadmeQuickStartTests(unittest.TestCase):
             "~/.local/bin/whydown diagnose",
             "sudo pacman -S python python-pyqt6",
             "sudo apt install python3 python3-pyqt6",
-            "docs/images/whydown-gui-dark.jpg",
+            "docs/images/whydown-gui-with-logo.png",
             "docs/GUI.md",
             "docs/TUI.md",
             "docs/PROJECT_HISTORY.md",
@@ -32,13 +32,15 @@ class ReadmeQuickStartTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
 
-    def test_screenshot_is_in_repo_and_is_a_real_jpeg(self):
+    def test_screenshot_is_in_repo_and_is_a_real_png(self):
         self.assertTrue(IMAGE.is_file(), "README screenshot is missing from Git")
         data = IMAGE.read_bytes()
         self.assertGreater(len(data), 10_000)
         self.assertLess(len(data), 1_000_000)
-        self.assertTrue(data.startswith(b"\xff\xd8\xff"), "Expected JPEG")
-        self.assertTrue(data.endswith(b"\xff\xd9"), "JPEG appears truncated")
+        self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"), "Expected PNG")
+        self.assertTrue(data.endswith(b"IEND\xaeB`\x82"), "PNG appears truncated")
+        self.assertGreater(int.from_bytes(data[16:20], "big"), 800)
+        self.assertGreater(int.from_bytes(data[20:24], "big"), 500)
 
     def test_archived_detail_preserved(self):
         archive = ROOT / "docs/PROJECT_HISTORY.md"
