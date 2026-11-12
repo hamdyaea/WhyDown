@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.5.2] - 2026-11-12
+
+### Fixed
+- Make filesystem and inode collection local-only by default with GNU df `--local` and exclusions for known network-backed FUSE mounts (including `fuse.rclone`), reducing stalls on unstable OneDrive/rclone, SSHFS and related mounts. Remote mount scanning is opt-in via `--include-remote-mounts`.
+- Retain valid mount entries when `df` exits nonzero but produces partial output. Explicitly mark partial/failed disk or inode queries and preserve real errors in collection notes rather than discarding all disk data with a generic message.
+- Add read-only per-collector timing capture for systemd, pacman, dpkg, df, du and journalctl. Report elapsed wall-clock milliseconds and success/failure in terminal, JSON schema v2 (additive `collector_timings`) and HTML.
+- Add tests for local/remote df option selection, mountinfo remote type detection, timing records, and report rendering.
+
+### Verification scope
+- A real Manjaro v0.5.0 run was reported very slow and once said `Filesystem usage unavailable` but a later invocation collected disk data. A remote/FUSE delay is plausible, **not confirmed**; previously there were no individual collector timings.
+- No repair, package change, network probe, telemetry or new Rust third-party dependency. Excluding remote mounts intentionally limits disk coverage unless explicitly opted in.
+
 ## [0.5.1] - 2026-11-12
 
 ### Added
