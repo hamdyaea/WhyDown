@@ -92,3 +92,8 @@ The `system` object adds:
 - `md_arrays`: array of `{name, expected, active}` for Linux MD arrays with explicit member counts.
 
 The corresponding new warning IDs are `LOW_MEMORY_HEADROOM`, `MEMORY_STALL_PRESSURE`, `IO_STALL_PRESSURE`, `FILE_HANDLE_LIMIT_NEAR`, `INODE_NEAR_FULL` and `MD_RAID_DEGRADED`. All have `scope=current_snapshot`. An absent sensor is not evidence of a clean result; the fields are null or empty on unsupported hosts. Existing JSON fields are retained; version 2 remains additive.
+
+
+## v0.5.1 progress output (no schema change)
+
+Live diagnostic progress is a **terminal user-interface feature**, not a report field. The bar goes exclusively to stderr, has TTY detection by default, and shows the percentage of **completed phases**, active collector name and elapsed time. `--progress` forces it; `--no-progress` silences it. JSON schema_version is still 2 and all report data remains on stdout or the `--output` file.
