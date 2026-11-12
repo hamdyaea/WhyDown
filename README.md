@@ -10,6 +10,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 ## Highlights
 
 - **Read-only by design:** never restarts services, changes configuration, installs packages, or escalates privileges.
+- **Interactive terminal interface (v0.8.0 development):** run `whydown tui` for a number-and-Enter evidence browser with focus/lookback configuration, incident timeline, findings, current-unit snapshots, limitations and safe export guidance. `whydown tui --demo` does not read host data. Requires a real terminal; see [TUI guide](docs/TUI.md).
 - **Offline:** no outbound network requests, no accounts, no telemetry, no remote AI service.
 - **Zero third-party Rust crates:** a minimal, auditable command-line application using only the Rust standard library.
 - **Useful initial coverage:** systemd service failures, journal-reported DNS/DHCP/link failures, missing default routes, inactive systemd-resolved stub, filesystem capacity, OOM/storage errors, and incomplete dpkg package states on Debian-family distributions.
@@ -197,7 +198,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.7.0
+./target/release/whydown --version   # expects the version recorded in Cargo.toml
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -212,11 +213,22 @@ whydown demo --format html --output example.html
 
 The demo shows **fictional** Wi-Fi disconnect, DHCP failure, DNS error and a failed service. It does not access system logs, network sockets or external services.
 
+### Interactive terminal browser (in development for v0.8.0)
+
+```bash
+cargo run -- tui --demo
+cargo run -- tui --focus all --since 4h --current-boot
+```
+
+Choose menu numbers followed by Enter. Browsing evidence never automatically saves files. TUI mode requires interactive stdin/stdout and rejects report-export flags to protect machine-readable output. See [the TUI guide](docs/TUI.md) for keys, privacy and troubleshooting.
+
 ## Usage
 
 ```text
 whydown [diagnose] [OPTIONS]
 whydown demo [OPTIONS]
+whydown tui [OPTIONS]
+whydown tui --demo
 
 --focus VALUE     all | network | services | system     (default: all)
 --since VALUE     e.g. 30m, 24h, 7d                (default: 24h)
@@ -239,6 +251,9 @@ Examples:
 ```bash
 # Diagnostic overview for the past day
 whydown diagnose
+
+# TUI evidence browser (interactive terminal only)
+whydown tui --since 4h --current-boot
 
 # Wi-Fi, DHCP, routes and DNS
 whydown diagnose --focus network --since 3h
