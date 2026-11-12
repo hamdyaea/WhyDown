@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 try:
@@ -169,6 +170,24 @@ def build_command(binary, *, demo=False, focus="all", since="4h",
     if include_remote_mounts and not demo: cmd.append("--include-remote-mounts")
     return cmd
 
+def load_brand_pixmap(binary):
+    """Read the embedded project icon from the same trusted WhyDown binary.
+
+    No separate asset download, writes, privileged access or shell execution.
+    Returns a null pixmap when testing a non-WhyDown fixture.
+    """
+    pixmap = QtGui.QPixmap()
+    try:
+        result = subprocess.run(
+            [os.fspath(binary), "icon"], stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=3, check=True)
+        if len(result.stdout) <= 100_000:
+            pixmap.loadFromData(result.stdout, "PNG")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return pixmap
+
+
 def parse_report(raw):
     if isinstance(raw, bytes):
         if len(raw) > MAX_REPORT_BYTES: raise ValueError("Report exceeds 8 MiB")
@@ -255,6 +274,9 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
             self.settings.value(THEME_SETTINGS_KEY, "dark", type=str))
         self.effective_theme = None
         self.setWindowTitle("WhyDown  |  Linux system diagnostics")
+        self.brand_pixmap = load_brand_pixmap(self.args.whydown_bin)
+        if not self.brand_pixmap.isNull():
+            self.setWindowIcon(QtGui.QIcon(self.brand_pixmap))
         self.setMinimumSize(980, 640)
         self.resize(1250, 810)
         self._ui()
@@ -322,7 +344,17 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         nav = QtWidgets.QVBoxLayout(sidebar)
         nav.setContentsMargins(22, 30, 22, 24)
         nav.setSpacing(9)
-        nav.addWidget(self.label("●  WhyDown", "Brand"))
+        brand_row = QtWidgets.QHBoxLayout()
+        brand_row.setSpacing(8)
+        self.brandmark = QtWidgets.QLabel()
+        self.brandmark.setFixedSize(42, 42)
+        if not self.brand_pixmap.isNull():
+            self.brandmark.setPixmap(self.brand_pixmap.scaled(
+                42, 42, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation))
+        brand_row.addWidget(self.brandmark)
+        brand_row.addWidget(self.label("WhyDown", "Brand"), 1)
+        nav.addLayout(brand_row)
         nav.addWidget(self.label("LOCAL SYSTEM DIAGNOSTICS", "SideCaption"))
         nav.addSpacing(46)
         nav.addWidget(self.label("WORKSPACE", "SideCaption"))
