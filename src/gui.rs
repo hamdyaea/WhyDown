@@ -39,6 +39,12 @@ pub fn run(cli: Cli) -> Result<u8, String> {
     if cli.current_boot {
         launcher.arg("--current-boot");
     }
+    if cli.disk_details {
+        launcher.arg("--disk-details");
+    }
+    if cli.include_remote_mounts {
+        launcher.arg("--include-remote-mounts");
+    }
     let status = launcher.status().map_err(|e| {
         format!("Cannot launch graphical WhyDown: {e}. \
                  Install Python 3 with Tkinter, or use 'whydown tui'.")
