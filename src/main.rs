@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process;
 #[cfg(unix)]
@@ -19,6 +19,15 @@ fn run() -> Result<u8, String> {
         }
         Command::Version => {
             println!("whydown {}", env!("CARGO_PKG_VERSION"));
+            return Ok(0);
+        }
+        Command::Logo => {
+            print!("{}", whydown::brand::ASCII_LOGO);
+            return Ok(0);
+        }
+        Command::Icon => {
+            io::stdout().write_all(whydown::brand::ICON_PNG)
+                .map_err(|e| format!("Cannot write PNG icon to stdout: {e}"))?;
             return Ok(0);
         }
         Command::Tui => {
@@ -82,7 +91,12 @@ fn run() -> Result<u8, String> {
             eprintln!("Report saved to {}", path.display());
         }
         _ => {
+            let show_brand = cli.format == OutputFormat::Text && io::stdout().is_terminal();
             let mut stdout = io::stdout().lock();
+            if show_brand {
+                stdout.write_all(whydown::brand::ASCII_LOGO.as_bytes())
+                    .map_err(|e| format!("Cannot write terminal branding: {e}"))?;
+            }
             stdout.write_all(output.as_bytes())
                 .map_err(|e| format!("Cannot write to stdout: {e}"))?;
         }
