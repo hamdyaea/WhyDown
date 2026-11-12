@@ -169,6 +169,7 @@ class WhyDownGUI:
         self.worker = None
         self.process = None
         self.messages = queue.Queue()
+        self.context_menus = []
         root.title("WhyDown - Linux diagnostics")
         root.geometry("1060x700")
         root.minsize(800, 540)
@@ -272,7 +273,9 @@ class WhyDownGUI:
         scroll.pack(side="right", fill="y")
         self.finding_tree.configure(yscrollcommand=scroll.set)
         self.finding_tree.bind("<<TreeviewSelect>>", self.select_finding)
+        self.configure_tree_copy(self.finding_tree)
         self.detail = self.text_area(right)
+        self.configure_text_copy(self.detail)
 
         self.event_tree = ttk.Treeview(timeline,
                                         columns=("time", "event", "subject", "source"),
@@ -286,14 +289,27 @@ class WhyDownGUI:
         event_scroll = ttk.Scrollbar(timeline, orient="vertical", command=self.event_tree.yview)
         event_scroll.pack(side="right", fill="y")
         self.event_tree.configure(yscrollcommand=event_scroll.set)
+        self.configure_tree_copy(self.event_tree)
         self.coverage = self.text_area(coverage)
+        self.configure_text_copy(self.coverage)
+
+        ttk.Label(
+            shell,
+            text="Select a passage with the mouse, then press Ctrl+C, right-click "
+                 "to Copy, or use Copy selection. Timeline entries copy as rows.",
+            style="Subtitle.TLabel",
+            wraplength=980,
+        ).pack(anchor="w", pady=(9, 0))
 
         footer = ttk.Frame(shell)
         footer.pack(fill="x", pady=(10, 0))
         self.save_button = ttk.Button(footer, text="Save private JSON report...",
                                       command=self.save_json, state="disabled")
         self.save_button.pack(side="left")
-        ttk.Label(footer, text="Read-only | Offline | No automatic export",
+        self.copy_button = ttk.Button(
+            footer, text="Copy selection", command=self.copy_active_selection)
+        self.copy_button.pack(side="left", padx=(10, 0))
+        ttk.Label(footer, text="Read-only | Offline | Copy only on request",
                   style="Subtitle.TLabel").pack(side="left", padx=15)
         ttk.Button(footer, text="Close", command=self.close).pack(side="right")
         self.write_text(self.detail, "Start an analysis to view findings automatically.")
@@ -306,7 +322,7 @@ class WhyDownGUI:
         box = ttk.Frame(parent)
         box.pack(fill="both", expand=True)
         text = tk.Text(box, wrap="word", state="disabled", font=("monospace", 10),
-                       relief="flat", borderwidth=8)
+                       relief="flat", borderwidth=8, exportselection=False)
         text.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(box, orient="vertical", command=text.yview)
         scrollbar.pack(side="right", fill="y")
@@ -319,6 +335,120 @@ class WhyDownGUI:
         widget.delete("1.0", "end")
         widget.insert("1.0", value)
         widget.configure(state="disabled")
+
+    def configure_text_copy(self, widget):
+        """Enable explicit partial text selection/copy on read-only details."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(
+            label="Copy selected text",
+            command=lambda w=widget: self.copy_text_selection(w))
+        menu.add_command(
+            label="Select all text",
+            command=lambda w=widget: self.select_all_text(w))
+        self.context_menus.append(menu)
+        widget.bind("<Control-c>", self.on_copy_text)
+        widget.bind("<Control-C>", self.on_copy_text)
+        widget.bind("<Control-Insert>", self.on_copy_text)
+        widget.bind("<Control-a>", self.on_select_all_text)
+        widget.bind("<Control-A>", self.on_select_all_text)
+        widget.bind("<Button-3>", lambda event, m=menu: self.popup_menu(event, m))
+
+    def configure_tree_copy(self, tree):
+        """Treeviews select rows, not individual characters inside cells."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(
+            label="Copy selected row(s)",
+            command=lambda w=tree: self.copy_tree_selection(w))
+        self.context_menus.append(menu)
+        tree.bind("<Control-c>", lambda event, w=tree: self.on_copy_tree(event, w))
+        tree.bind("<Control-C>", lambda event, w=tree: self.on_copy_tree(event, w))
+        tree.bind("<Control-Insert>", lambda event, w=tree: self.on_copy_tree(event, w))
+        tree.bind(
+            "<Button-3>",
+            lambda event, w=tree, m=menu: self.tree_context(event, w, m))
+
+    @staticmethod
+    def popup_menu(event, menu):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    def tree_context(self, event, tree, menu):
+        row = tree.identify_row(event.y)
+        if row and row not in tree.selection():
+            tree.selection_set(row)
+        return self.popup_menu(event, menu)
+
+    @staticmethod
+    def selected_text(widget):
+        """Return only the highlighted characters, not the complete report."""
+        indices = widget.tag_ranges("sel")
+        if len(indices) != 2:
+            return ""
+        return widget.get(indices[0], indices[1])
+
+    @staticmethod
+    def selected_rows(tree):
+        """Copy only explicitly selected visible tree entries."""
+        lines = []
+        for item in tree.selection():
+            label = str(tree.item(item, "text"))
+            values = [str(value) for value in tree.item(item, "values")]
+            cells = ([label] if label else []) + values
+            if cells:
+                lines.append("\t".join(cells))
+        return "\n".join(lines)
+
+    def copy_to_clipboard(self, value):
+        if not value:
+            self.status.set("Select some text or a result row before copying.")
+            return False
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.root.update_idletasks()
+        except tk.TclError:
+            self.status.set("Could not access the desktop clipboard.")
+            return False
+        self.status.set(f"Copied {len(value)} character(s) to the clipboard.")
+        return True
+
+    def copy_text_selection(self, widget):
+        return self.copy_to_clipboard(self.selected_text(widget))
+
+    def copy_tree_selection(self, tree):
+        return self.copy_to_clipboard(self.selected_rows(tree))
+
+    @staticmethod
+    def select_all_text(widget):
+        widget.tag_add("sel", "1.0", "end-1c")
+        widget.focus_set()
+        return "break"
+
+    def on_select_all_text(self, event):
+        return self.select_all_text(event.widget)
+
+    def on_copy_text(self, event):
+        self.copy_text_selection(event.widget)
+        return "break"
+
+    def on_copy_tree(self, _event, tree):
+        self.copy_tree_selection(tree)
+        return "break"
+
+    def copy_active_selection(self):
+        """Copy the highlighted text/row in the currently visible results tab."""
+        current_tab = self.tabs.tab(self.tabs.select(), "text")
+        if current_tab == "Coverage & limits":
+            return self.copy_text_selection(self.coverage)
+        if current_tab == "Timeline":
+            return self.copy_tree_selection(self.event_tree)
+        text = self.selected_text(self.detail)
+        if text:
+            return self.copy_to_clipboard(text)
+        return self.copy_tree_selection(self.finding_tree)
 
     def analyze(self):
         if self.worker is not None and self.worker.is_alive():
