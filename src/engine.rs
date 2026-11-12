@@ -1,6 +1,6 @@
 //! Deterministic diagnostic rules. Each finding separates observation from hypothesis.
 
-use crate::model::{Confidence, Event, EventKind, Finding, Focus, NetworkIncident, Report, ServiceEventWindow, Severity, Snapshot};
+use crate::model::{count_word, Confidence, Event, EventKind, Finding, Focus, NetworkIncident, Report, ServiceEventWindow, Severity, Snapshot};
 use crate::time::{now_unix, utc_timestamp};
 
 pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bool) -> Report {
@@ -317,7 +317,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             id: "FAILED_SYSTEMD_UNITS",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: format!("{} currently failed systemd unit(s)", snapshot.failed_units.len()),
+            title: format!("{} currently failed systemd {}", snapshot.failed_units.len(), count_word(snapshot.failed_units.len(), "unit", "units")),
             explanation: "systemd currently reports failed units. Their relation to the reported incident is not established.".into(),
             evidence: snapshot.failed_units.iter().take(10).cloned().collect(),
             checks: vec!["Inspect `systemctl --failed` and `journalctl -u <unit>`".into()],
@@ -329,7 +329,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 id: "FAILED_USER_SYSTEMD_UNITS",
                 severity: Severity::Warning,
                 confidence: Confidence::Observed,
-                title: format!("{} currently failed user systemd unit(s)", user_failed.len()),
+                title: format!("{} currently failed user systemd {}", user_failed.len(), count_word(user_failed.len(), "unit", "units")),
                 explanation: "The invoking user's systemd manager reports currently failed units; separate from system units.".into(),
                 evidence: user_failed.iter().take(10).cloned().collect(),
                 checks: vec!["Inspect `systemctl --user --failed` and the user journal".into()],
@@ -353,8 +353,12 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             explanation: "Classified journal entries are NOT a count of independently failed services. Multiple units and unrelated generic messages may occur at the same time. Current system/user failed-unit states are checked separately when available.".into(),
             evidence: {
                 let mut evidence = vec![
-                    format!("{failures} classified entries across {} distinct second(s) in {} time window(s)", distinct_seconds.len(), windows.len()),
-                    format!("{unknown} entries without an identified unit (possibly related or unrelated)"),
+                    format!("{failures} classified {} across {} distinct {} in {} time {}",
+                        count_word(failures, "entry", "entries"),
+                        distinct_seconds.len(), count_word(distinct_seconds.len(), "second", "seconds"),
+                        windows.len(), count_word(windows.len(), "window", "windows")),
+                    format!("{unknown} {} without an identified unit (possibly related or unrelated)",
+                        count_word(unknown, "entry", "entries")),
                 ];
                 let names = event_subjects(events, EventKind::ServiceFailure);
                 if !names.is_empty() { evidence.push(format!("Identified unit(s): {}", names.join(", "))); }
@@ -364,7 +368,9 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                         e.kind == EventKind::ServiceFailure && e.timestamp < estimated_boot).count();
                     if before_boot > 0 {
                         evidence.push(format!(
-                            "{before_boot} classified entries predate the estimated current boot (based on uptime; system clock changes can affect this)"
+                            "{before_boot} classified {} {} the estimated current boot (based on uptime; system clock changes can affect this)",
+                            count_word(before_boot, "entry", "entries"),
+                            count_word(before_boot, "predates", "predate")
                         ));
                     }
                 }
@@ -511,6 +517,22 @@ mod tests {
         assert_eq!(report.service_event_windows[1].units, vec!["proton-backup.service"]);
         let finding = report.findings.iter().find(|f| f.id == "SERVICE_FAILURE_LOGS").unwrap();
         assert!(finding.explanation.contains("NOT a count"));
+    }
+
+    #[test]
+    fn singular_historical_message_evidence_is_grammatical() {
+        let snapshot = Snapshot {
+            uptime_seconds: Some(50),
+            events: vec![
+                Event { timestamp: 1, kind: EventKind::ServiceFailure,
+                    subject: Some("sample.service".into()), source: Some("systemd".into()) },
+            ],
+            ..Snapshot::default()
+        };
+        let report = analyze(snapshot, 3_600, Focus::Services, false);
+        let finding = report.findings.iter().find(|f| f.id == "SERVICE_FAILURE_LOGS").unwrap();
+        assert!(finding.evidence.iter().any(|s| s.contains("1 classified entry across 1 distinct second in 1 time window")));
+        assert!(finding.evidence.iter().any(|s| s.contains("1 classified entry predates the estimated current boot")));
     }
 
     #[test]

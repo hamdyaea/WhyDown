@@ -278,3 +278,19 @@ pub struct Report {
     pub network_incidents: Vec<NetworkIncident>,
     pub service_event_windows: Vec<ServiceEventWindow>,
 }
+
+/// Return grammatical singular/plural labels without altering numeric data.
+pub fn count_word(count: usize, singular: &'static str, plural: &'static str) -> &'static str {
+    if count == 1 { singular } else { plural }
+}
+
+#[cfg(test)]
+mod count_word_tests {
+    use super::count_word;
+    #[test]
+    fn singular_and_plural_counts() {
+        assert_eq!(count_word(0, "entry", "entries"), "entries");
+        assert_eq!(count_word(1, "entry", "entries"), "entry");
+        assert_eq!(count_word(2, "entry", "entries"), "entries");
+    }
+}
