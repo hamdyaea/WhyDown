@@ -8,7 +8,7 @@ All notable changes to WhyDown will be documented here.
 - Read-only dpkg status diagnostics for Debian/Ubuntu and other dpkg-managed Linux distributions, using machine-readable `dpkg-query` rather than localized `dpkg --audit` text.
 - Report unpacked, half-installed, half-configured, trigger-pending/awaited or reinstallation-required packages as current `DPKG_INCOMPLETE_PACKAGES` findings; ignore fully installed and residual config-only packages.
 - Surface dpkg status and affected package identifiers in terminal, JSON schema v2 (additive fields) and HTML; distinguish absent dpkg databases from unsuccessful queries.
-- Add regression tests using Debian 13 kernel package configuration failures observed on a real VM.
+- Add regression tests using Debian 13 kernel package configuration failures observed on a real VM, and subsequently validate the v0.3.6 finding **on that VM**: four packages detected (three unpacked, one half-configured), while system/user systemd units remained healthy.
 - Update README, report schema and cross-distribution test matrix. No repairs, package changes, telemetry or network requests.
 
 ## [0.3.5] - 2026-11-12

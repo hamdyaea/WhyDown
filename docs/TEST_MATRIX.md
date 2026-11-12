@@ -1,12 +1,12 @@
 # Cross-distribution validation matrix
 
-**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were also manually exercised with v0.3.5 as root; user-manager, exports and APT/dpkg diagnostics remain incomplete.
+**Status: mixed manual validations and pending test plan.** CI builds on Ubuntu and checks synthetic journal fixtures. Manjaro diagnostics were tested through v0.3.3. On Raspberry Pi OS ARM64 (Debian 12), v0.3.3/v0.3.4 source builds and service diagnostics succeeded; v0.3.4 GNU failed with `GLIBC_2.39 not found`; the v0.3.5 static-musl installation and service diagnostics succeeded on real hardware. Debian 13 (Trixie) x86_64 VM installation and four text diagnostic focuses were manually exercised with v0.3.5 as root and later as the normal user. The **v0.3.6 dpkg diagnostic has now been validated live**, identifying four kernel packages in incomplete states while both systemd managers reported zero failed units. JSON/HTML exports on the VM still require manual checking.
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
 | Manjaro | x86_64 | Tested through v0.3.3; retest v0.3.5 installer | NetworkManager, XFS /var, pacman cache, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
-| Debian 13 (Trixie) VM | x86_64 | **Partially validated on v0.3.5**: static-musl installation and text reports run under root and `hamdy`; both managers reported zero failed units for normal user. `dpkg --audit` confirmed 4 incomplete kernel packages that v0.3.5 did not detect. New v0.3.6 rule has fixture coverage; real VM retest pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
+| Debian 13 (Trixie) VM | x86_64 | **v0.3.6 dpkg detection validated live**: `all` and `system` reported exactly four incompletely configured kernel packages previously confirmed by `dpkg --audit`; zero failed system/user units. Static-musl installation and previous text diagnostics also tested. JSON/HTML exports pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
 | Ubuntu Server | x86_64 or aarch64 | Planned | headless services, journal permissions |
 | Kali Purple VM | x86_64 | Planned | nonstandard service log formats |
@@ -63,7 +63,7 @@ The WhyDown v0.3.4 ARM64 GNU archive downloaded and passed its checksum on Raspb
 - Successful read-only text report execution: `--focus all`, `network`, `services`, and `system`, using `--since 24h --max-events 5000`. Each returned `NO_CLASSIFIED_ANOMALY`; this is a rule-match result, **not system health certification**.
 - Network snapshot: local IPv4 and IPv6 default routes present, `enp0s3` kernel operstate `up`; neither demonstrates internet connectivity.
 - Systemd: zero failed system units at snapshot; root user's systemd manager unavailable, correctly reported as `not checked`. The normal user's manager was not tested.
-- A prior `dpkg` command reportedly exited with code 1 during a kernel package operation. This **was not detected** by WhyDown's current rules; it does not currently inspect APT/dpkg transaction failures or unfinished package configurations. Collect `dpkg --audit` and `apt-get -s -f install` in the VM to investigate separately, without automatic repair.
+- A prior `dpkg` command exited with code 1 during a kernel package operation. WhyDown v0.3.5 did not detect the resulting incomplete configurations, but **v0.3.6 did detect those package states** on the same VM. It still does not determine the root cause of the package transaction failure. Collect `dpkg --audit` and `apt-get -s -f install` in the VM to investigate separately, without automatic repair.
 - Subsequently manually verified on the same VM: diagnostics as unprivileged `hamdy` show zero currently failed system/user units. Still pending: JSON schema-v2/HTML export, representative real network/storage failures, and all available journal entries.
 
 
@@ -75,4 +75,14 @@ The WhyDown v0.3.4 ARM64 GNU archive downloaded and passed its checksum on Raspb
 - `linux-image-amd64`: unpacked
 - `linux-image-6.12.116+deb13-amd64`: half-configured
 
-`apt-get -s -f install` showed four `Conf` actions and no actual repair was run. WhyDown v0.3.5 reported no classified anomaly under `--focus system`, demonstrating a gap in package-state coverage despite zero currently failed systemd units. v0.3.6 adds read-only dpkg-query collection and synthetic regression tests reproducing these four states. Manual validation of the v0.3.6 binary **on the affected VM is still pending**, as are package-manager error cause identification and actual package repair.
+`apt-get -s -f install` showed four `Conf` actions and no actual repair was run. WhyDown v0.3.5 reported no classified anomaly under `--focus system`, demonstrating a gap in package-state coverage despite zero currently failed systemd units. v0.3.6 adds read-only dpkg-query collection and synthetic regression tests reproducing these four states. **Real VM validation succeeded on 2026-11-12**: `--focus all` and `--focus system` reported the `DPKG_INCOMPLETE_PACKAGES` warning, counted four packages and listed all affected names/states, while the current systemd snapshot reported zero failed system/user units. Root-cause investigation and any package repair have not been performed.
+
+## Real Debian 13 dpkg diagnostic validation (2026-11-12)
+
+WhyDown v0.3.6 was manually run as the normal user `hamdy` in the Debian GNU/Linux 13 (Trixie) x86_64 VM, kernel `6.12.115+deb13.1-amd64`. Both `--focus system` and `--focus all` identified:
+- `linux-headers-6.12.116+deb13-amd64`: `unpacked`
+- `linux-headers-amd64`: `unpacked`
+- `linux-image-6.12.116+deb13-amd64`: `half-configured`
+- `linux-image-amd64`: `unpacked`
+
+The finding was `DPKG_INCOMPLETE_PACKAGES`, severity `WARN`, scope `current_snapshot`, and the count was exactly **4**, consistent with an earlier `dpkg --audit` inspection. Both system and user systemd managers reported **0 failed units**. These observations validate the new rule on a real broken dpkg state; they do **not** establish why the package configuration failed, that system health is otherwise verified, or that a repair succeeded. The session did not run repair commands. JSON/HTML reports have not yet been manually verified on this VM.
