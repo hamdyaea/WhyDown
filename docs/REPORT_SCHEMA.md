@@ -128,3 +128,14 @@ JSON schema remains **2**. New top-level fields:
 Default `--max-events` is now **5000** (configurable up to 10000). The collector requests `--lines=N+1`, discards an older sentinel if present and classifies the newest N. The selected `--since` and `--current-boot` filters still apply; inaccessible/expired logs and events outside the time window remain unknown.
 
 A truncated window is marked **PARTIAL** in text/HTML. If it yielded no recognized anomaly, it results in informational `INSUFFICIENT_EVIDENCE` rather than `NO_CLASSIFIED_ANOMALY`. If one or more other findings exist, an informational `JOURNAL_WINDOW_TRUNCATED` finding is added alongside them (scope `unverified`); the other observations are still valid within the sampled tail.
+
+
+## WhyDown v0.7.0: incident context and packet-drop deltas (schema remains 2)
+
+Under `system`, the additive `interface_drop_deltas` field is `null` if no second comparable network sample was available, or an array of `{name, rx_dropped_delta, tx_dropped_delta, elapsed_ms}` entries. The values are unsigned differences between two observations of /proc/net/dev during this diagnostic run, **not** lifetime totals, packet-loss rates or evidence that Internet connectivity failed. An interface missing from either sample or counters that decreased/reset is excluded. No additional sampling sleep is imposed.
+
+The historical event `kind` values `wifi_associated`, `wifi_roam_start`, `usb_disconnect`, `usb_transport_error`, and `service_restart_scheduled` are additive. The first two are network context; the next two are system context; the last is service context. Only actual error kinds form the network incident-window count; positive associations never create zero-count network incidents.
+
+New finding IDs: `WIFI_LOCAL_ROAM_OBSERVED` (info), `RECENT_INTERFACE_DROPS` (info, current snapshot), `SERVICE_RESTART_OBSERVED` (info), `USB_DISCONNECT_BURST` (warning), and `DISK_CAPACITY_WATCH` (info, current snapshot). `LINK_DISCONNECTS` and `SERVICE_FAILURE_LOGS` retain their historical warning semantics, with new corroborating evidence when later reconnect/restart scheduling is observed. A service scheduled to restart is not proof it was available, and a Wi-Fi association is not proof of working DNS or Internet access.
+
+No raw journal entries, Wi-Fi BSSIDs, USB serial numbers, UFW source/destination IPs or command output bodies are exported by these rules.
