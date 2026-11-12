@@ -5,6 +5,7 @@ use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
+use std::net::IpAddr;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -101,6 +102,9 @@ pub fn collect_with_options(
         progress.begin("Checking storage and resource health");
         progress.detail("Reading kernel memory, pressure and RAID snapshots");
         crate::health::collect_kernel(&mut snapshot);
+        if let Ok(info) = fs::read_to_string("/proc/self/mountinfo") {
+            snapshot.root_filesystem_read_only = parse_root_mount_read_only(&info);
+        }
         // pacman -Dk checks local package database consistency without any
         // sync/installation/removal, and only when pacman's DB is present.
         if fs::metadata("/var/lib/pacman/local").is_ok() {
@@ -150,6 +154,7 @@ pub fn collect_with_options(
         match capture_timed(&mut snapshot, "df disk usage", "df", df_args(false, include_remote_mounts)) {
             Ok((complete, output)) => {
                 snapshot.disks = parse_df(&output);
+                snapshot.disk_usage_checked = !snapshot.disks.is_empty();
                 if !complete {
                     snapshot.notes.push(format!(
                         "Filesystem usage partially collected: df exited nonzero; retained {} valid entries",
@@ -222,6 +227,7 @@ pub fn collect_with_options(
     journal_args.push(count_arg.as_str());
     match capture_timed(&mut snapshot, "journalctl", "journalctl", &journal_args) {
         Ok((true, output)) => {
+            snapshot.journal_checked = true;
             let lines: Vec<&str> = output.lines().collect();
             // With --lines N, a long journal may contain earlier entries not read here.
             if lines.len() >= max_events {
@@ -406,11 +412,37 @@ pub fn parse_ipv6_default_route(content: &str) -> bool {
     })
 }
 
+/// Inspect the visible root mount of this mount namespace without
+/// resolving paths or touching any filesystem contents. The final match
+/// represents the most recent visible entry for the root mountpoint.
+/// Intended read-only immutable systems may legitimately return true.
+pub fn parse_root_mount_read_only(content: &str) -> Option<bool> {
+    let mut result = None;
+    for line in content.lines() {
+        let Some((left, _)) = line.split_once(" - ") else { continue };
+        let columns: Vec<&str> = left.split_whitespace().collect();
+        if columns.len() < 6 || columns[4] != "/" { continue; }
+        let opts = columns[5].split(',').collect::<Vec<_>>();
+        if opts.contains(&"ro") { result = Some(true); }
+        else if opts.contains(&"rw") { result = Some(false); }
+    }
+    result
+}
+
 pub fn parse_resolv_conf(content: &str) -> (usize, bool) {
-    let servers: Vec<_> = content.lines().filter_map(|line| {
+    // An arbitrary token after "nameserver" is not a configured DNS address.
+    // IPv6 link-local resolver scopes may include %interface suffix.
+    let servers: Vec<&str> = content.lines().filter_map(|line| {
         let line = line.split('#').next()?.trim();
         let mut parts = line.split_whitespace();
-        if parts.next()? == "nameserver" { parts.next() } else { None }
+        if parts.next()? != "nameserver" { return None; }
+        let candidate = parts.next()?;
+        let literal = candidate.split('%').next().unwrap_or(candidate);
+        if literal.parse::<IpAddr>().is_ok() {
+            Some(candidate)
+        } else {
+            None
+        }
     }).collect();
     let stub = servers.iter().any(|s| *s == "127.0.0.53" || *s == "127.0.0.54");
     (servers.len(), stub)
@@ -565,10 +597,11 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
         }
         // Kernel messages such as "e1000e ... enp3s0: NIC Link is Down".
         for word in text.split_whitespace() {
-            let candidate = word.trim_end_matches(':');
-            if let Some(name) = identifier(candidate) {
-                if network_interface(&name) && candidate.ends_with(':') {
-                    return Some(name);
+            // The colon belongs to the original journal token. Checking it
+            // after trimming (as before v0.6.0) made this branch unreachable.
+            if let Some(candidate) = word.strip_suffix(':') {
+                if let Some(name) = identifier(candidate) {
+                    if network_interface(&name) { return Some(name); }
                 }
             }
         }
@@ -639,6 +672,11 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
 
 pub fn classify_log_line(text: &str) -> Option<EventKind> {
     let t = text.to_ascii_lowercase();
+
+    if ["too many open files", "file table overflow", "emfile", "enfile"]
+        .iter().any(|p| t.contains(p)) {
+        return Some(EventKind::FileHandleExhaustion);
+    }
 
     if ["out of memory", "oom-killer", "memory cgroup out of memory", "killed process"].iter().any(|p| t.contains(p)) {
         return Some(EventKind::OutOfMemory);
@@ -741,6 +779,36 @@ mod tests {
         let base = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000001 00000000 00200200";
         assert!(!parse_ipv6_default_route(&format!("{base} lo\n")));
         assert!(parse_ipv6_default_route(&format!("{base} eth0\n")));
+    }
+
+    #[test]
+    fn network_kernel_interface_is_attributed_to_actual_device() {
+        let events = parse_journal(
+            "1700000010.100 host kernel: wlan0: deauthenticated from 11:22:33:44:55:66\\n\\
+1700000011.100 host kernel: e1000e 0000:00:19.0 enp3s0: NIC Link is Down\\n"
+                .replace("\\n", "\n").as_str());
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].subject.as_deref(), Some("wlan0"));
+        assert_eq!(events[1].subject.as_deref(), Some("enp3s0"));
+    }
+
+    #[test]
+    fn read_only_root_mount_detected_without_touching_mounts() {
+        let rw = "20 1 8:2 / / rw,relatime - ext4 /dev/sda2 rw\n";
+        let ro = "20 1 8:2 / / ro,relatime - squashfs /dev/loop0 ro\n";
+        assert_eq!(parse_root_mount_read_only(rw), Some(false));
+        assert_eq!(parse_root_mount_read_only(ro), Some(true));
+        assert_eq!(parse_root_mount_read_only("bad data"), None);
+    }
+
+    #[test]
+    fn fd_errors_are_classified_without_retaining_raw_log_messages() {
+        let events = parse_journal(
+            "1700000020.000 host app[55]: open: Too many open files for /secret/config\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::FileHandleExhaustion);
+        assert_eq!(events[0].subject, None);
+        assert!(!format!("{events:?}").contains("/secret/config"));
     }
 
     #[test]
