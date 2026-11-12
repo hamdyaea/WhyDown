@@ -20,8 +20,12 @@ FOCUSES = ("all", "network", "services", "system")
 LOOKBACKS = ("1h", "4h", "24h", "7d")
 MAX_EVENTS = ("5000", "10000")
 MAX_REPORT_BYTES = 8 * 1024 * 1024
+THEMES = ("system", "light", "dark")
+THEME_SETTINGS_KEY = "appearance/theme"
 
-STYLE = """
+# The light palette is our existing visual design. A complete dark override
+# keeps menus, controls, results and selected evidence readable throughout.
+LIGHT_STYLE = """
 QMainWindow, QWidget#Root { background: #f2f6fb; color: #1c2b3e; }
 QFrame#Sidebar { background: #142136; border: 0; }
 QLabel#Brand { color: white; font-size: 23px; font-weight: 800; }
@@ -68,6 +72,81 @@ QSplitter::handle { background: #e5edf5; width: 2px; }
 QProgressBar { border: 0; background: #e1e9f0; border-radius: 3px; height: 5px; }
 QProgressBar::chunk { background: #10a99b; border-radius: 3px; }
 """
+
+DARK_STYLE = LIGHT_STYLE + """
+QMainWindow, QWidget#Root { background: #0b1421; color: #e3edf8; }
+QFrame#Sidebar { background: #080f1c; border: 0; }
+QLabel#Brand { color: #f4f8ff; }
+QLabel#SideCaption { color: #9fb4ce; }
+QPushButton#Nav { background: transparent; color: #b8cbe2; }
+QPushButton#Nav:hover { background: #24354b; color: #ffffff; }
+QPushButton#Nav:checked { background: #1b504f; color: #b8fff1; }
+QLabel#Title { color: #f0f5fc; }
+QLabel#Muted { color: #afc1d6; }
+QLabel#CardTitle { color: #e7f0fa; }
+QLabel#CardValue { color: #f0f6ff; }
+QLabel#CardCaption { color: #a7bcd0; }
+QLabel#Pill { color: #a6f6e5; background: #1a4947; }
+QFrame#Card { background: #152338; border: 1px solid #293b52; }
+QComboBox { background: #1b2a40; color: #edf4ff;
+  border: 1px solid #40546a; }
+QComboBox:hover { border: 1px solid #49c8bd; }
+QComboBox QAbstractItemView { background: #18283c; color: #edf6ff;
+  selection-background-color: #23685e; selection-color: #ffffff; }
+QCheckBox { color: #d8e6f4; }
+QPushButton#Primary { background: #008d83; color: #ffffff; }
+QPushButton#Primary:hover { background: #13a99c; }
+QPushButton#Primary:disabled { background: #375d60; color: #bad5d4; }
+QPushButton#Secondary { background: #1d3047; color: #e4edf8;
+  border: 1px solid #3d5068; }
+QPushButton#Secondary:hover { background: #294358; }
+QTabWidget::pane { background: #152338; border: 1px solid #293b52; }
+QTabBar::tab { background: transparent; color: #b1c3da; }
+QTabBar::tab:selected { color: #7af4d9; border-bottom: 3px solid #40d2b9; }
+QTreeWidget { background: #152338; color: #eaf3ff;
+  alternate-background-color: #1b2c42; }
+QTreeWidget::item:selected { color: #eafff6; background: #1e655e; }
+QHeaderView::section { background: #1e3047; color: #d9e7f6;
+  border-bottom: 1px solid #34485f; }
+QPlainTextEdit { background: #152338; color: #edf5ff;
+  selection-color: #ffffff; selection-background-color: #146e69; }
+QSplitter::handle { background: #34475f; }
+QProgressBar { background: #304259; }
+QProgressBar::chunk { background: #3ad2bf; }
+"""
+
+def normalize_theme(value):
+    """Never feed untrusted/persisted values into the theme selection."""
+    return value if isinstance(value, str) and value in THEMES else "system"
+
+
+def resolve_theme(preference, system_dark):
+    """Pure theme rule, also testable on Linux/Qt versions without colorScheme."""
+    preference = normalize_theme(preference)
+    if preference != "system":
+        return preference
+    return "dark" if system_dark else "light"
+
+
+def system_prefers_dark(app):
+    """Qt >= 6.5: platform color scheme; earlier Qt: original system palette.
+
+    A CSS-styled window's background must not be used to infer the desktop
+    theme: this function only examines Qt's platform/style hints or app palette.
+    """
+    hints = app.styleHints()
+    if hasattr(hints, "colorScheme") and hasattr(QtCore.Qt, "ColorScheme"):
+        scheme = hints.colorScheme()
+        if scheme == QtCore.Qt.ColorScheme.Dark:
+            return True
+        if scheme == QtCore.Qt.ColorScheme.Light:
+            return False
+    return app.palette().color(QtGui.QPalette.ColorRole.Window).lightness() < 128
+
+
+def stylesheet_for(preference, system_dark):
+    return DARK_STYLE if resolve_theme(preference, system_dark) == "dark" else LIGHT_STYLE
+
 
 def build_command(binary, *, demo=False, focus="all", since="4h",
                   max_events=10000, current_boot=True, disk_details=False,
@@ -171,11 +250,21 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.running = False
         self.out = bytearray()
         self.err = bytearray()
+        self.settings = QtCore.QSettings("WhyDown", "WhyDown")
+        self.theme_preference = normalize_theme(
+            self.settings.value(THEME_SETTINGS_KEY, "system", type=str))
+        self.effective_theme = None
         self.setWindowTitle("WhyDown  |  Linux system diagnostics")
         self.setMinimumSize(980, 640)
         self.resize(1250, 810)
-        self.setStyleSheet(STYLE)
         self._ui()
+        self._apply_theme()
+        hints = QtWidgets.QApplication.instance().styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._system_theme_changed)
+        app = QtWidgets.QApplication.instance()
+        if hasattr(app, "paletteChanged"):
+            app.paletteChanged.connect(self._system_theme_changed)
         self.process = QtCore.QProcess(self)
         self.process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.SeparateChannels)
         self.process.readyReadStandardOutput.connect(self._stdout)
@@ -267,6 +356,19 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         headings.addWidget(self.label("Understand what happened, backed by local evidence.", "Muted"))
         header.addLayout(headings)
         header.addStretch()
+        header.addWidget(self.label("APPEARANCE", "Muted"))
+        self.theme_box = QtWidgets.QComboBox()
+        self.theme_box.setObjectName("ThemeSelector")
+        self.theme_box.addItems(("System", "Light", "Dark"))
+        self.theme_box.setCurrentText(self.theme_preference.capitalize())
+        self.theme_box.setAccessibleName("Appearance: System, Light or Dark")
+        self.theme_box.setToolTip(
+            "System follows your desktop appearance when Qt supports it. "
+            "Your choice is saved locally.")
+        self.theme_box.setMinimumWidth(105)
+        self.theme_box.currentTextChanged.connect(self._theme_selected)
+        header.addWidget(self.theme_box)
+        header.addSpacing(10)
         header.addWidget(self.label("●  PRIVATE & LOCAL", "Pill"))
         main.addLayout(header)
 
@@ -381,6 +483,28 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.save_button.clicked.connect(self.export_json)
         footer.addWidget(self.save_button)
         main.addLayout(footer)
+
+    def _theme_selected(self, label):
+        # Only an explicit user change is persisted. Opening the GUI or
+        # receiving a system theme update never changes the user's setting.
+        choice = normalize_theme(label.lower())
+        if choice == self.theme_preference:
+            return
+        self.theme_preference = choice
+        self.settings.setValue(THEME_SETTINGS_KEY, choice)
+        self._apply_theme()
+
+    def _apply_theme(self):
+        app = QtWidgets.QApplication.instance()
+        resolved = resolve_theme(self.theme_preference, system_prefers_dark(app))
+        if resolved == self.effective_theme:
+            return
+        self.effective_theme = resolved
+        self.setStyleSheet(DARK_STYLE if resolved == "dark" else LIGHT_STYLE)
+
+    def _system_theme_changed(self, *_args):
+        if self.theme_preference == "system":
+            self._apply_theme()
 
     def _navigate(self, index):
         for i, button in enumerate(self.navbuttons):

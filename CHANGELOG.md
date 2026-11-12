@@ -2,6 +2,20 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.10.1] - 2026-11-12
+
+### Qt6 appearance controls
+- Add an accessible **Appearance** selector in the Qt6 GUI header: **System** (fresh-install default), **Light**, or **Dark**, without restarting WhyDown or rerunning a diagnostic.
+- Apply a full dark palette across the application surface, navigation, settings, summary cards, tabs, results trees, headers, read-only evidence editors, selection colors and progress indicators; retain the existing light theme.
+- Persist **only explicit user choices** using local Qt `QSettings` (`appearance/theme`); do not upload preferences or write configuration simply on GUI launch.
+- In System mode, use Qt's desktop color-scheme hint when available (Qt >= 6.5) and react to color-scheme/palette change signals. On older Qt versions, fall back to the desktop palette; automatic change notifications are best-effort depending on desktop integration.
+- Preserve native mouse text selection, Ctrl+C and exact clipboard copying regardless of theme. CLI/TUI outputs, diagnostic engine and JSON schema v2 are unchanged.
+
+### Tests
+- Add headless tests for preference normalization, dark/light overrides and system theme resolution.
+- Extend the real Qt6/Xvfb GUI test with theme toggling, local preference persistence across reopening a window, simulated desktop appearance changes and evidence selection/copy regression.
+- Keep the release binary matrix, Rust tests, strict Clippy, installer checks and privacy boundaries unchanged. Real Manjaro Wayland/X11 theme-follow testing is still pending.
+
 ## [0.10.0] - 2026-11-12
 
 ### Qt 6 desktop redesign

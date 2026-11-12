@@ -304,3 +304,12 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - Installer preflight checks `python3 -c 'from PyQt6.QtWidgets import QApplication'`; unavailable optional packages do not block installation of CLI/TUI. Test stubs simulate absent Python, absent Qt and working Qt.
 - JSON schema v2, collector rule behavior, shell-free subprocess launch, 8 MiB output cap, 240-second timeout and opt-in private file writes remain unchanged.
 - Actual compositor/native clipboard-manager verification on Manjaro and Debian has **not** been performed; Xvfb is a virtual X server.
+
+## v0.10.1 GUI appearance switching (Linux Qt6 CI)
+
+- Headless Python model tests verify that only `system`, `light` and `dark` are accepted, invalid persisted values default to System, and explicit Light/Dark overrides ignore the host appearance.
+- A real Qt6 GUI under Xvfb changes the Appearance combobox through System, Dark and Light, asserting the appropriate rendered Qt stylesheet and that enabled read-only text remains mouse-selectable.
+- `QSettings` persistence is checked by opening a new GUI window after an explicit Dark selection; tests isolate `XDG_CONFIG_HOME` in a temporary directory to avoid modifying the CI user's preferences.
+- The test simulates a desktop color-scheme change in System mode, verifies both dark/light palettes appear, and checks that the stored `system` choice remains untouched.
+- The existing mouse selection, native Ctrl+C, exact Copy selection, timeline and coverage tests still run after theme changes; no GUI theme selection affects report contents or CLI/TUI behavior.
+- Automatic live system-following is dependent on Qt/desktop integration: Qt 6.5+ color scheme notifications are observed when available; earlier versions fall back to the native palette and its change notifications when provided. Manual Manjaro/Debian system-theme verification remains pending.
