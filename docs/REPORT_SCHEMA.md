@@ -139,3 +139,7 @@ The historical event `kind` values `wifi_associated`, `wifi_roam_start`, `usb_di
 New finding IDs: `USB_TRANSPORT_STATUS` (info, historical journal); `WIFI_LOCAL_ROAM_OBSERVED` (info), `RECENT_INTERFACE_DROPS` (info, current snapshot), `SERVICE_RESTART_OBSERVED` (info), `USB_DISCONNECT_BURST` (warning), and `DISK_CAPACITY_WATCH` (info, current snapshot). `LINK_DISCONNECTS` and `SERVICE_FAILURE_LOGS` retain their historical warning semantics, with new corroborating evidence when later reconnect/restart scheduling is observed. A service scheduled to restart is not proof it was available, and a Wi-Fi association is not proof of working DNS or Internet access.
 
 No raw journal entries, Wi-Fi BSSIDs, USB serial numbers, UFW source/destination IPs or command output bodies are exported by these rules.
+
+### Correlation timing precision (post-v0.7.0)
+
+Journal events are retained as integer Unix seconds; subsecond ordering is not stored. If a Wi-Fi deauthentication/link event and association have identical timestamps, the report may note their co-occurrence, but **must not describe one as following the other** or claim verified recovery. Strictly later-second associations can be described as subsequent observations, still without proving connectivity. The `USB_DISCONNECT_BURST` count is the count of distinct topology paths, not the number of independent hardware faults or physical devices.
