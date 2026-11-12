@@ -51,6 +51,25 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    if report.focus.includes(Focus::System) {
+        if let Some(checked) = report.snapshot.dpkg_checked {
+            writeln!(out, "CURRENT DPKG PACKAGE STATUS (read-only)").unwrap();
+            if checked {
+                writeln!(out, "  Incomplete package states: {}", report.snapshot.dpkg_problem_count).unwrap();
+                for pkg in &report.snapshot.dpkg_problems {
+                    writeln!(out, "  {}: {}{}", pkg.name, pkg.state,
+                        if pkg.reinstall_required { " (reinstallation required)" } else { "" }).unwrap();
+                }
+                if report.snapshot.dpkg_problem_count > report.snapshot.dpkg_problems.len() {
+                    writeln!(out, "  Remaining affected packages omitted from detailed display").unwrap();
+                }
+            } else {
+                writeln!(out, "  Package database query unavailable; status not verified").unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+    }
+
     if report.focus.includes(Focus::Services) {
         writeln!(out, "CURRENT SYSTEMD FAILED UNIT SNAPSHOT").unwrap();
         if report.snapshot.system_units_checked {
@@ -251,6 +270,16 @@ pub fn json(report: &Report) -> String {
                 Some(items) => arr(items.iter().cloned().map(js).collect()),
                 None => JsonValue::Null,
             }),
+            ("dpkg_checked", opt_bool(s.dpkg_checked)),
+            ("dpkg_problem_count", match s.dpkg_checked {
+                Some(true) => n(s.dpkg_problem_count as u64),
+                _ => JsonValue::Null,
+            }),
+            ("dpkg_problems", arr(s.dpkg_problems.iter().map(|pkg| object(vec![
+                ("name", js(pkg.name.clone())),
+                ("state", js(pkg.state.clone())),
+                ("reinstall_required", JsonValue::Bool(pkg.reinstall_required)),
+            ])).collect())),
             ("interfaces", arr(s.interfaces.iter().map(|iface| object(vec![
                 ("name", js(iface.name.clone())),
                 ("operstate", opt_str(&iface.operstate)),
@@ -372,6 +401,24 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
                 html_escape(&iface.name), html_escape(iface.operstate.as_deref().unwrap_or("unknown"))).unwrap();
         }
     }
+    if report.focus.includes(Focus::System) {
+        if let Some(checked) = report.snapshot.dpkg_checked {
+            out.push_str("<h2>Current dpkg package status</h2><p class=\"muted\">Read-only package database query; no repairs performed.</p>");
+            if checked {
+                write!(out, "<p>{} incompletely configured package state(s)</p>",
+                    report.snapshot.dpkg_problem_count).unwrap();
+                out.push_str("<ul>");
+                for pkg in &report.snapshot.dpkg_problems {
+                    write!(out, "<li><code>{}</code>: {}{}</li>",
+                        html_escape(&pkg.name), html_escape(&pkg.state),
+                        if pkg.reinstall_required { " (reinstallation required)" } else { "" }).unwrap();
+                }
+                out.push_str("</ul>");
+            } else {
+                out.push_str("<p>Package database query unavailable; status not verified</p>");
+            }
+        }
+    }
     if report.focus.includes(Focus::Services) {
         out.push_str("<h2>Current systemd failed units</h2><p>");
         write!(out, "System manager: {}; User manager: {}",
@@ -442,6 +489,12 @@ mod tests {
         assert!(structured.contains("\"active_connectivity_probed\": false"));
         assert!(structured.contains("\"service_event_windows\""));
         assert!(structured.contains("\"failed_user_units\""));
+        assert!(structured.contains("\"dpkg_checked\": true"));
+        assert!(structured.contains("\"dpkg_problem_count\": 1"));
+        assert!(structured.contains("\"example-kernel-headers\""));
+        assert!(structured.contains("\"DPKG_INCOMPLETE_PACKAGES\""));
+        assert!(plain.contains("CURRENT DPKG PACKAGE STATUS"));
+        assert!(plain.contains("example-kernel-headers: unpacked"));
         assert!(plain.contains("CURRENT SYSTEMD FAILED UNIT SNAPSHOT"));
         let page = html(&report);
         assert!(page.contains("<!doctype html>"));
