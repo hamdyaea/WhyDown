@@ -2,6 +2,7 @@
 //!
 //! No network probes, privilege escalation, service modifications, or telemetry.
 
+pub mod brand;
 pub mod cli;
 pub mod collect;
 pub mod demo;
