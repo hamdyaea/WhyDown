@@ -1,6 +1,6 @@
 //! Deterministic example inputs for screenshots and smoke tests.
 
-use crate::model::{DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats,
+use crate::model::{CollectorTiming, DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats,
     MemoryHealth, PressureHealth, FileHandleHealth, InodeHealth, Snapshot};
 use crate::time::now_unix;
 
@@ -53,6 +53,9 @@ pub fn snapshot() -> Snapshot {
             Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
         ],
         journal_current_boot_only: false,
+        collector_timings: vec![CollectorTiming {
+            name: "demo fixture", elapsed_ms: 0, succeeded: true,
+        }],
         notes: vec!["DEMO DATA: no local system information was read".into()],
     }
 }
