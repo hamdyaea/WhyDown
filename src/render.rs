@@ -723,6 +723,35 @@ mod tests {
     use crate::model::Focus;
 
     #[test]
+    fn targeted_systemd_state_is_rendered_and_not_confused_with_app_readiness() {
+        let mut snapshot = demo::snapshot();
+        snapshot.failed_units.clear();
+        snapshot.service_statuses = vec![crate::model::ServiceStatus {
+            unit: "example-backup.service".into(),
+            load_state: "loaded".into(),
+            active_state: "active".into(),
+            sub_state: "running".into(),
+            result: "success".into(),
+            n_restarts: Some(1),
+        }];
+        snapshot.events.push(crate::model::Event {
+            timestamp: crate::time::now_unix(),
+            kind: crate::model::EventKind::ServiceRestartScheduled,
+            subject: Some("example-backup.service".into()),
+            source: Some("systemd".into()),
+        });
+        let report = engine::analyze(snapshot, 3600, Focus::All, true);
+        assert!(text(&report).contains("active=active sub=running result=success NRestarts=1"));
+        let j = json(&report);
+        assert!(j.contains("\"service_statuses\""));
+        assert!(j.contains("\"n_restarts\": 1"));
+        let h = html(&report);
+        assert!(h.contains("Targeted current unit states"));
+        assert!(h.contains("application readiness is not verified"));
+        assert!(report.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+    }
+
+    #[test]
     fn sampled_drop_deltas_are_rendered_separately_from_cumulative_totals() {
         let mut snapshot = demo::snapshot();
         snapshot.interface_drop_deltas = Some(vec![crate::model::NetworkDropDelta {
