@@ -55,10 +55,10 @@ jobs:
         run: python3 tests/tui_pty_smoke.py ./target/release/whydown
       - name: GUI model tests (no display needed)
         run: python3 -m unittest discover -s tests -p 'test_gui.py' -v
-      - name: Desktop GUI smoke test on Xvfb (fictional evidence only)
+      - name: Qt6 desktop GUI mouse-selection smoke test on Xvfb
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk xvfb
+          sudo apt-get install -y python3-pyqt6 xvfb
           xvfb-run -a python3 tests/gui_xvfb_smoke.py ./target/release/whydown
       - name: Guided installer smoke test (no network)
         run: sh tests/install_smoke.sh
