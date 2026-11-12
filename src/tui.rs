@@ -291,8 +291,7 @@ mod tests {
         // Run, choose finding 1, inspect timeline, coverage, export hint and quit.
         let mut input = Cursor::new(b"1\n\n6\n1\n\n7\n\n8\n\n9\n\n0\n".as_slice());
         let mut output = Vec::new();
-        let mut cli = Cli::default();
-        cli.tui_demo = true;
+        let cli = Cli { tui_demo: true, ..Cli::default() };
         run_with_io(&mut input, &mut output, cli, false).unwrap();
         let transcript = String::from_utf8(output).unwrap();
         assert!(transcript.contains("DEMO (fictional)"));
@@ -308,8 +307,7 @@ mod tests {
     fn changing_configuration_invalidates_previous_report() {
         let mut input = Cursor::new(b"1\n\n2\n6\n\n0\n".as_slice());
         let mut output = Vec::new();
-        let mut cli = Cli::default();
-        cli.tui_demo = true;
+        let cli = Cli { tui_demo: true, ..Cli::default() };
         run_with_io(&mut input, &mut output, cli, false).unwrap();
         assert!(String::from_utf8(output).unwrap().contains("Run a diagnostic first"));
     }
