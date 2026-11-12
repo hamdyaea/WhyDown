@@ -54,8 +54,20 @@ pub fn text(report: &Report) -> String {
     }
 
     if report.focus.includes(Focus::System) {
+        if let Some(checked) = report.snapshot.pacman_checked {
+            writeln!(out, "CURRENT PACMAN LOCAL DATABASE CHECK (read-only)").unwrap();
+            let status = if !checked {
+                "not verified (command unavailable or query failed)"
+            } else if report.snapshot.pacman_consistent == Some(true) {
+                "consistency check passed (not installed-file integrity)"
+            } else {
+                "check returned an error; inspect pacman -Dk output"
+            };
+            writeln!(out, "  {status}").unwrap();
+            writeln!(out).unwrap();
+        }
         if let Some(checked) = report.snapshot.dpkg_checked {
-            writeln!(out, "CURRENT DPKG PACKAGE STATUS (read-only)").unwrap();
+            writeln!(out, "CURRENT DPKG PACKAGE STATUS (dpkg database only; not a pacman check)").unwrap();
             if checked {
                 writeln!(out, "  Incomplete package states: {}", report.snapshot.dpkg_problem_count).unwrap();
                 for pkg in &report.snapshot.dpkg_problems {
@@ -273,6 +285,8 @@ pub fn json(report: &Report) -> String {
                 Some(items) => arr(items.iter().cloned().map(js).collect()),
                 None => JsonValue::Null,
             }),
+            ("pacman_checked", opt_bool(s.pacman_checked)),
+            ("pacman_consistent", opt_bool(s.pacman_consistent)),
             ("dpkg_checked", opt_bool(s.dpkg_checked)),
             ("dpkg_problem_count", match s.dpkg_checked {
                 Some(true) => n(s.dpkg_problem_count as u64),
@@ -406,8 +420,15 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         }
     }
     if report.focus.includes(Focus::System) {
+        if let Some(checked) = report.snapshot.pacman_checked {
+            out.push_str("<h2>pacman local database consistency</h2><p class=\"muted\">Read-only pacman -Dk; does not check installed file integrity or updates.</p><p>");
+            out.push_str(if !checked { "Not verified: query unavailable" }
+                else if report.snapshot.pacman_consistent == Some(true) { "Local database check passed" }
+                else { "Check returned an error; inspect pacman -Dk output" });
+            out.push_str("</p>");
+        }
         if let Some(checked) = report.snapshot.dpkg_checked {
-            out.push_str("<h2>Current dpkg package status</h2><p class=\"muted\">Read-only package database query; no repairs performed.</p>");
+            out.push_str("<h2>Current dpkg package status</h2><p class=\"muted\">dpkg database only, not pacman; no repairs performed.</p>");
             if checked {
                 write!(out, "<p>{} incompletely configured package state(s)</p>",
                     report.snapshot.dpkg_problem_count).unwrap();
@@ -479,6 +500,25 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn pacman_check_is_separate_in_text_html_and_json() {
+        let mut snapshot = demo::snapshot();
+        snapshot.pacman_checked = Some(true);
+        snapshot.pacman_consistent = Some(false);
+        snapshot.dpkg_checked = None;
+        snapshot.dpkg_problems.clear();
+        snapshot.dpkg_problem_count = 0;
+        let report = engine::analyze(snapshot, 3600, Focus::System, true);
+        assert!(report.findings.iter().any(|f| f.id == "PACMAN_DATABASE_CHECK_FAILED"));
+        let plain = text(&report);
+        assert!(plain.contains("CURRENT PACMAN LOCAL DATABASE CHECK"));
+        assert!(!plain.contains("CURRENT DPKG PACKAGE STATUS"));
+        let structured = json(&report);
+        assert!(structured.contains("\"pacman_checked\": true"));
+        assert!(structured.contains("\"pacman_consistent\": false"));
+        assert!(html(&report).contains("pacman local database consistency"));
+    }
 
     #[test]
     fn current_boot_scope_is_visible_across_report_formats() {
