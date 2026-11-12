@@ -2,7 +2,7 @@
 
 All notable changes to WhyDown will be documented here.
 
-## [Unreleased]
+## [0.7.1] - 2026-11-12
 
 ### Added
 - For up to four recognized systemd **system** services with historical failure journal messages, query a current read-only `systemctl show` snapshot (3-second timeout and 8 KiB output cap per unit). Record validated `LoadState`, `ActiveState`, `SubState`, `Result` and `NRestarts` in additive `system.service_statuses` JSON, text and HTML. These observations supplement restart evidence without replacing historical warnings or implying application readiness.
@@ -16,6 +16,7 @@ All notable changes to WhyDown will be documented here.
 
 ### Field validation
 - Manjaro x86_64, kernel `7.2.9-1-MANJARO`, live v0.7.0 static-musl installer and SHA-256 passed on 2026-11-12. `--focus all --current-boot --since 3h --max-events 10000` finished in about one second; 5,356 entries were examined without journal truncation. Confirmed 18-second `wlan0` reassociation after a link event, LightDM restart scheduling, 12 USB topology paths detached in a burst with nearby `r8152` status, 0 RX/TX drop increments in 1,074 ms, and 88% `/home` / 86% `/opt` capacity advisories. This validates detection on the supplied live run, **not** a verified root cause or recovery.
+- Real Manjaro v0.7.1 **source-build** validation: `cargo test --locked` passed 88 unit tests and 11 CLI integration tests (99 total), and `cargo build --release --locked` completed. A subsequent all-focus diagnosis finished in approximately one second and exported the JSON-v2 `system.service_statuses` snapshot: `lightdm.service` load=loaded, active=active, sub=running, result=success, NRestarts=1. The USB burst contained **10 topology paths only on root branch `1-1`** with nearby r8152 transport status, excluding unrelated detaches on branch `1-5`. This validates source code functionality on Manjaro, not a v0.7.1 release archive or a proven USB hardware cause.
 
 ## [0.7.0] - 2026-11-12
 
