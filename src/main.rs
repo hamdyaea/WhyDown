@@ -5,7 +5,8 @@ use std::process;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use whydown::cli::{Cli, Command, OutputFormat, HELP};
-use whydown::model::Severity;
+use whydown::model::{Focus, Severity};
+use whydown::progress::Progress;
 use whydown::{analyze, collect, demo, render, time};
 
 fn run() -> Result<u8, String> {
@@ -27,16 +28,30 @@ fn run() -> Result<u8, String> {
         return Err("Live diagnostics currently require Linux. Use `whydown demo` on other systems.".into());
     }
 
+    let stages = 3
+        + usize::from(cli.focus.includes(Focus::Network))
+        + usize::from(cli.focus.includes(Focus::Services))
+        + usize::from(cli.focus.includes(Focus::System));
+    let mut progress = Progress::new(cli.progress_mode, if cli.command == Command::Demo { 3 } else { stages });
     let mut snapshot = match cli.command {
-        Command::Demo => demo::snapshot(),
-        _ => collect::collect(cli.focus, time::now_unix().saturating_sub(cli.since_seconds),
-            cli.max_events, cli.disk_details, cli.current_boot),
+        Command::Demo => {
+            progress.begin("Preparing demo evidence");
+            let snapshot = demo::snapshot();
+            progress.complete_step();
+            snapshot
+        }
+        _ => collect::collect_with_progress(
+            cli.focus, time::now_unix().saturating_sub(cli.since_seconds),
+            cli.max_events, cli.disk_details, cli.current_boot, &progress),
     };
     if cli.command == Command::Demo {
         let since_unix = time::now_unix().saturating_sub(cli.since_seconds);
         snapshot.events.retain(|event| event.timestamp >= since_unix);
     }
+    progress.begin("Analyzing diagnostic evidence");
     let report = analyze(snapshot, cli.since_seconds, cli.focus, cli.command == Command::Demo);
+    progress.complete_step();
+    progress.begin("Generating and saving report");
     let output = match cli.format {
         OutputFormat::Text => render::text(&report),
         OutputFormat::Json => render::json(&report),
@@ -56,6 +71,8 @@ fn run() -> Result<u8, String> {
                 .map_err(|e| format!("Cannot write to stdout: {e}"))?;
         }
     }
+    progress.complete_step();
+    progress.finish();
     Ok(if should_fail { 1 } else { 0 })
 }
 
