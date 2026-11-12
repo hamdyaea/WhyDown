@@ -43,7 +43,8 @@ impl Finding {
             | "PACMAN_DATABASE_CHECK_FAILED" | "LOW_MEMORY_HEADROOM"
             | "MEMORY_STALL_PRESSURE" | "IO_STALL_PRESSURE"
             | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
-            | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY" => "current_snapshot",
+            | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY"
+            | "CPU_CONTENTION_PRESSURE" => "current_snapshot",
             "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE" => "unverified",
             _ => "historical_journal",
         }
