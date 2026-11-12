@@ -50,3 +50,15 @@ A service that exited with code 1 may have automatically restarted, and a SIGTER
 - `SERVICE_FAILURE_LOGS` evidence may mention how many classified messages predate the estimated current boot.
 
 All extensions are additive; `schema_version` remains 2.
+
+
+## Additions in WhyDown v0.3.6 (schema remains 2)
+
+For `focus=system` or `focus=all`, the `system` object includes:
+- `dpkg_checked`: `true` when the local dpkg status database was queried successfully, `false` if present but query failed, `null` if the dpkg database is absent or the focus excludes system.
+- `dpkg_problem_count`: number of incomplete/broken dpkg states (integer when queried successfully; `null` otherwise).
+- `dpkg_problems`: bounded list (max 50) of `{name, state, reinstall_required}`; these are local package identifiers, not raw logs.
+
+`DPKG_INCOMPLETE_PACKAGES` is a warning with `scope=current_snapshot` when a dpkg query detects incomplete configurations. Only the first 15 affected package names are included in finding evidence. The collector ignores harmless residual configuration files and fully installed packages.
+
+`dpkg-query` is a read-only database inspection; WhyDown does not execute a repair, simulate APT, or establish what caused a package's post-install failure.
