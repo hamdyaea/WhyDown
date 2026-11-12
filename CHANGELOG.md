@@ -2,6 +2,15 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [Unreleased]
+
+### Fixed
+- Avoid asserting that a Wi-Fi association happened *after* local-choice deauthentication or link loss when both are retained in the same whole-second journal bucket; co-occurrence is still reported, with event order explicitly unknown. Preserve the validated 18-second reassociation evidence when seconds differ.
+- Label USB disconnect bursts as **topology-path detachments** rather than a count of distinct devices or independent faults.
+
+### Field validation
+- Manjaro x86_64, kernel `7.2.9-1-MANJARO`, live v0.7.0 static-musl installer and SHA-256 passed on 2026-11-12. `--focus all --current-boot --since 3h --max-events 10000` finished in about one second; 5,356 entries were examined without journal truncation. Confirmed 18-second `wlan0` reassociation after a link event, LightDM restart scheduling, 12 USB topology paths detached in a burst with nearby `r8152` status, 0 RX/TX drop increments in 1,074 ms, and 88% `/home` / 86% `/opt` capacity advisories. This validates detection on the supplied live run, **not** a verified root cause or recovery.
+
 ## [0.7.0] - 2026-11-12
 
 ### Added
