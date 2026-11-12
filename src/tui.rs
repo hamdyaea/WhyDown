@@ -375,7 +375,7 @@ mod tests {
         let transcript = String::from_utf8(output).unwrap();
         for expected in ["Focus changed to network", "Lookback changed to 7d",
             "Current boot filter enabled", "Journal cap changed to 10000",
-            "No report for these settings yet"] {
+            "START HERE: press 1 + Enter"] {
             assert!(transcript.contains(expected), "Missing status: {expected}");
         }
     }
