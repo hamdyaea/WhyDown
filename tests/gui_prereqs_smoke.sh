@@ -2,7 +2,7 @@
 # Standalone GUI prerequisite check: never downloads or installs anything.
 set -eu
 
-temp=$(mktemp -d "\${TMPDIR:-/tmp}/whydown-gui-check.XXXXXXXX") ||
+temp=$(mktemp -d "${TMPDIR:-/tmp}/whydown-gui-check.XXXXXXXX") ||
     { echo "Cannot create test directory" >&2; exit 1; }
 trap 'rm -rf -- "$temp"' 0
 
@@ -22,7 +22,7 @@ cat >"$temp/bin/python3" <<'PYTHON'
 case "$1" in
     --version) printf 'Python 3.13.0\n'; exit 0 ;;
     -c)
-        case "\${FAKE_TK_MODE:-missing}" in
+        case "${FAKE_TK_MODE:-missing}" in
             ok) exit 0 ;;
             missing) printf 'ModuleNotFoundError: tkinter\n' >&2; exit 1 ;;
         esac ;;
