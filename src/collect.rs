@@ -783,10 +783,11 @@ mod tests {
 
     #[test]
     fn network_kernel_interface_is_attributed_to_actual_device() {
-        let events = parse_journal(
-            "1700000010.100 host kernel: wlan0: deauthenticated from 11:22:33:44:55:66\\n\\
-1700000011.100 host kernel: e1000e 0000:00:19.0 enp3s0: NIC Link is Down\\n"
-                .replace("\\n", "\n").as_str());
+        let journal = concat!(
+            "1700000010.100 host kernel: wlan0: deauthenticated from 11:22:33:44:55:66\n",
+            "1700000011.100 host kernel: e1000e 0000:00:19.0 enp3s0: NIC Link is Down\n"
+        );
+        let events = parse_journal(journal);
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].subject.as_deref(), Some("wlan0"));
         assert_eq!(events[1].subject.as_deref(), Some("enp3s0"));
