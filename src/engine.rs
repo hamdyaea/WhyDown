@@ -573,6 +573,10 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
     }
 }
 
+fn usb_root_port(path: &str) -> &str {
+    path.split('.').next().unwrap_or(path)
+}
+
 fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Finding>) {
     crate::health::assess(snapshot, findings);
     if snapshot.root_filesystem_read_only == Some(true) {
@@ -679,18 +683,23 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
             });
         }
     }
-    // A group of USB detachments in 30 seconds may represent a single hub
-    // unplugging; do not treat every child as an independent hardware fault.
+    // Group only paths under the SAME USB root-port topology branch.
+    // A burst spanning different root ports can represent unrelated actions.
+    // A subtree detachment can also represent ONE hub loss, not many faults.
     let usb: Vec<&Event> = events.iter().filter(|e| e.kind == EventKind::UsbDisconnect).collect();
     let mut usb_burst_reported = false;
     for start in usb.iter().take(64) {
+        let Some(start_path) = start.subject.as_deref() else { continue };
+        let root_port = usb_root_port(start_path);
         let affected: std::collections::HashSet<String> = usb.iter()
             .filter(|e| e.timestamp >= start.timestamp && e.timestamp - start.timestamp <= 30)
-            .filter_map(|e| e.subject.clone()).collect();
+            .filter_map(|e| e.subject.as_deref())
+            .filter(|path| usb_root_port(path) == root_port)
+            .map(str::to_owned).collect();
         if affected.len() >= 4 {
             let mut evidence = vec![format!(
-                "{} distinct USB topology paths detached within 30 seconds beginning {}",
-                affected.len(), utc_timestamp(start.timestamp)
+                "{} distinct USB topology paths on root-port branch {} detached within 30 seconds beginning {}",
+                affected.len(), root_port, utc_timestamp(start.timestamp)
             )];
             if events.iter().any(|e| e.kind == EventKind::UsbTransportError
                 && e.timestamp.abs_diff(start.timestamp) <= 30) {
@@ -702,7 +711,7 @@ fn diagnose_system(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fin
                 severity: Severity::Warning,
                 confidence: Confidence::Observed,
                 title: "Multiple USB topology paths detached in one short interval".into(),
-                explanation: "Several USB paths detached close together. A dock or hub being unplugged or powered down is possible; this does not prove a hardware fault or causation of later network events.".into(),
+                explanation: "Several USB topology paths under one root-port branch detached close together. This may be a single hub/dock detachment or power event; it does not prove independent device faults, physical cause or causation of later network events.".into(),
                 evidence,
                 checks: vec![
                     "Check whether a dock/hub was intentionally unplugged, powered off or reset".into(),
@@ -885,6 +894,35 @@ mod tests {
             ..Snapshot::default()
         }, 3600, Focus::System, false);
         assert!(!distant.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"));
+    }
+
+    #[test]
+    fn usb_burst_does_not_mix_distinct_root_port_branches() {
+        let e = |port: &str| Event {
+            timestamp: 100,
+            kind: EventKind::UsbDisconnect,
+            subject: Some(port.to_owned()),
+            source: Some("kernel".into()),
+        };
+        let mixed = analyze(Snapshot {
+            events: vec![e("1-5"), e("1-5.1"), e("1-1"), e("1-1.1")],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        assert!(!mixed.findings.iter().any(|f| f.id == "USB_DISCONNECT_BURST"),
+            "events on separate USB root ports must not count as one burst");
+
+        let cascade = analyze(Snapshot {
+            events: vec![
+                e("1-5"), e("1-5.1"), e("1-1"), e("1-1.1"),
+                e("1-1.1.1"), e("1-1.1.2"),
+            ],
+            ..Snapshot::default()
+        }, 3600, Focus::System, false);
+        let finding = cascade.findings.iter().find(|f|
+            f.id == "USB_DISCONNECT_BURST").unwrap();
+        assert!(finding.evidence.iter().any(|line|
+            line.contains("4 distinct USB topology paths on root-port branch 1-1")));
+        assert!(!finding.evidence.iter().any(|line| line.contains("6 distinct")));
     }
 
     #[test]
