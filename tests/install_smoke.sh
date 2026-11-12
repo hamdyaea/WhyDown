@@ -24,6 +24,9 @@ prefix=$(mktemp -d "${TMPDIR:-/tmp}/whydown-installer-ci.XXXXXXXX")
 trap 'rm -rf -- "$prefix"' 0
 XDG_DATA_HOME="$prefix/xdg" sh scripts/install.sh --from-source --desktop --prefix "$prefix"
 test -f "$prefix/xdg/applications/whydown.desktop"
+test -f "$prefix/xdg/icons/hicolor/256x256/apps/whydown.png"
+"$prefix/bin/whydown" icon | cmp - "$prefix/xdg/icons/hicolor/256x256/apps/whydown.png"
+grep -q '^Icon=whydown$' "$prefix/xdg/applications/whydown.desktop"
 grep -F "Exec=$prefix/bin/whydown gui" "$prefix/xdg/applications/whydown.desktop"
 grep -q 'Terminal=false' "$prefix/xdg/applications/whydown.desktop"
 version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -1)

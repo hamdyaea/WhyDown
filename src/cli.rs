@@ -8,6 +8,8 @@ pub enum Command {
     Demo,
     Tui,
     Gui,
+    Logo,
+    Icon,
     Help,
     Version,
 }
@@ -87,6 +89,8 @@ impl Cli {
                     "demo" => Command::Demo,
                     "tui" => Command::Tui,
                     "gui" => Command::Gui,
+                    "logo" => Command::Logo,
+                    "icon" => Command::Icon,
                     "help" => Command::Help,
                     "version" => Command::Version,
                     _ => return Err(format!("Unknown command: {first}")),
@@ -227,6 +231,8 @@ USAGE
   whydown tui --demo
   whydown gui [OPTIONS]
   whydown gui --demo
+  whydown logo                  # show the ASCII project mark
+  whydown icon > whydown.png   # export embedded PNG icon
   whydown --help
 
 COMMANDS
@@ -234,6 +240,8 @@ COMMANDS
   demo             Show a safe, deterministic example (no system inspection)
   tui              Guided terminal evidence browser (requires a terminal)
   gui              Modern Qt6 desktop GUI (Python 3 + PyQt6, optional)
+  logo             Show the portable ASCII project logo
+  icon             Write the official PNG app icon to stdout (binary)
   help             Show this help
   version          Show program version
 
@@ -324,6 +332,12 @@ mod tests {
             assert!(Cli::parse(args).is_err(), "flag {bad}");
         }
         assert_eq!(Cli::parse(["diagnose"]).unwrap().max_events, 5_000);
+    }
+
+    #[test]
+    fn standalone_logo_and_icon_commands_parse() {
+        assert_eq!(Cli::parse(["logo"]).unwrap().command, Command::Logo);
+        assert_eq!(Cli::parse(["icon"]).unwrap().command, Command::Icon);
     }
 
     #[test]

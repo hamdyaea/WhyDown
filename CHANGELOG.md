@@ -2,6 +2,17 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.10.3] - 2026-11-12
+
+### Official visual identity
+- Adopt the selected WD monogram and descending turquoise diagnostic line as the official WhyDown icon, with a transparent PNG derived from the chosen artwork and a scalable SVG wordmark for GitHub.
+- Embed the PNG in the no-dependency Rust executable. `whydown icon` exports the bytes, including from static/musl binaries.
+- Qt6 now displays the icon in the window and sidebar. `install.sh --desktop` installs the same embedded icon into the user's XDG hicolor icon theme and sets Icon=whydown.
+- Add a matching plain-ASCII `whydown logo` command and visual identity to TUI dashboards. Show ASCII branding in human-readable CLI results only on real terminals; piped JSON/HTML, files, scripts and --version are unaffected.
+- No changes to read-only collectors, rules, telemetry or JSON schema v2.
+
+### Validation
+- Verify PNG signature, ASCII output, JSON/HTML integrity, desktop icon byte-for-byte export and Qt6 window icon loading.
 ## [0.10.2] - 2026-11-12
 
 ### First-run appearance and documentation

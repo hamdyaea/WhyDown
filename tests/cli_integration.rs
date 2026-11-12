@@ -9,6 +9,26 @@ fn whydown(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn embedded_icon_and_ascii_mark_do_not_pollute_json_or_script_stdout() {
+    let icon = whydown(&["icon"]);
+    assert!(icon.status.success());
+    assert!(icon.stdout.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(icon.stdout.len() > 1_000);
+    assert!(icon.stderr.is_empty());
+
+    let brand = whydown(&["logo"]);
+    assert!(brand.status.success());
+    let ascii = String::from_utf8(brand.stdout).unwrap();
+    assert!(ascii.contains("WhyDown"));
+    assert!(ascii.is_ascii());
+
+    // Piped JSON must still be exactly a JSON document, not a logo header.
+    let json = whydown(&["demo", "--format", "json"]);
+    assert!(json.status.success());
+    assert_eq!(json.stdout.first(), Some(&b'{'));
+}
+
+#[test]
 fn interactive_tui_rejects_pipes_without_hanging_or_reading_system_data() {
     let result = whydown(&["tui", "--demo"]);
     assert_eq!(result.status.code(), Some(2));

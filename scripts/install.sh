@@ -2,7 +2,7 @@
 # WhyDown: install prebuilt Linux binaries (default), or build locally.
 # No automatic system package installation, sudo or service changes.
 set -eu
-VERSION="${WHYDOWN_VERSION:-v0.10.2}"
+VERSION="${WHYDOWN_VERSION:-v0.10.3}"
 PREFIX="${WHYDOWN_PREFIX:-${HOME:-}/.local}"
 LIBC=auto
 MODE=binary
@@ -223,8 +223,21 @@ else
     gui_ready=0
 fi
 if [ "$DESKTOP" -eq 1 ]; then
-    appdir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-    mkdir -p "$appdir" || fail "Cannot create desktop application directory"
+    datadir="${XDG_DATA_HOME:-$HOME/.local/share}"
+    appdir="$datadir/applications"
+    icondir="$datadir/icons/hicolor/256x256/apps"
+    mkdir -p "$appdir" "$icondir" || fail "Cannot create desktop application directories"
+    icon_tmp=$(mktemp "$icondir/.whydown-icon.XXXXXXXX") ||
+        fail "Cannot stage the WhyDown icon"
+    if ! "$PREFIX/bin/whydown" icon > "$icon_tmp"; then
+        rm -f -- "$icon_tmp"
+        fail "Cannot obtain embedded WhyDown PNG icon"
+    fi
+    chmod 644 "$icon_tmp" ||
+        { rm -f -- "$icon_tmp"; fail "Cannot set icon file permissions"; }
+    mv -f -- "$icon_tmp" "$icondir/whydown.png" ||
+        { rm -f -- "$icon_tmp"; fail "Cannot install WhyDown icon"; }
+    say "Application icon: $icondir/whydown.png"
     desktop_tmp=$(mktemp "$appdir/.whydown-app.XXXXXXXX") ||
         fail "Cannot stage desktop launcher"
     if ! cat > "$desktop_tmp" <<EOF
@@ -236,7 +249,7 @@ GenericName=Linux Diagnostics
 Comment=Evidence-based, read-only Linux troubleshooting
 Exec=$PREFIX/bin/whydown gui
 TryExec=$PREFIX/bin/whydown
-Icon=utilities-system-monitor
+Icon=whydown
 Terminal=false
 Categories=System;Utility;
 Keywords=Linux;System;Diagnostics;Network;

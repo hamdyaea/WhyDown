@@ -87,6 +87,12 @@ try:
     system_reopened.close()
     app.processEvents()
 
+    # The actual release executable exports the same official icon as the GUI.
+    assert not gui.brand_pixmap.isNull(), "Official embedded WD PNG is unreadable"
+    assert not gui.windowIcon().isNull(), "Desktop window must have a WhyDown icon"
+    assert gui.brandmark.pixmap() is not None
+    assert not gui.brandmark.pixmap().isNull()
+
     assert gui.focus.currentText() == "all"
     assert gui.since.currentText() == "4h"
     assert gui.cap.currentText() == "10000"
