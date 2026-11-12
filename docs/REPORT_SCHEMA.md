@@ -62,3 +62,12 @@ For `focus=system` or `focus=all`, the `system` object includes:
 `DPKG_INCOMPLETE_PACKAGES` is a warning with `scope=current_snapshot` when a dpkg query detects incomplete configurations. Only the first 15 affected package names are included in finding evidence. The collector ignores harmless residual configuration files and fully installed packages.
 
 `dpkg-query` is a read-only database inspection; WhyDown does not execute a repair, simulate APT, or establish what caused a package's post-install failure.
+
+
+## Additions in WhyDown v0.4.0 (schema remains 2)
+
+Top-level `journal_current_boot_only` (boolean) indicates whether `journalctl --boot=0` was requested. Journal entries are still constrained by `lookback_seconds`; route, filesystem, dpkg and systemd status snapshots reflect the present and are not restricted by journal boot selection.
+
+`--exit-on-warning` is a CLI process status policy, not a JSON field. Exit codes: 0 for successful report generation (including warnings without that flag), 1 for warnings **with** the flag, and 2 for CLI/report write errors. Successful report generation does not guarantee a healthy host.
+
+Collector processes are time-bounded and stdout-limited. Collection failures, timeouts and oversized outputs must appear in `collection_notes` and should not be interpreted as a healthy subsystem. File output uses private Unix permissions, and `--overwrite` uses staged replacement.
