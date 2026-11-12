@@ -104,3 +104,16 @@ Live diagnostic progress is a **terminal user-interface feature**, not a report 
 Top-level `collector_timings` is an array of `{name, elapsed_ms, succeeded}` entries. A `name` is a fixed safe label (for example `df disk usage`, `pacman -Dk` or `journalctl`), `elapsed_ms` is the observed wall-clock duration and `succeeded` reflects the command exit status. No raw stdout/stderr, command-line paths, credentials, or network responses are retained.
 
 By default disk and inode checks use local-only `df` with common network-backed FUSE types excluded. `--include-remote-mounts` enables previous all-mount behavior. Valid partial `df` output is kept when `df` exits unsuccessfully; a collection note explicitly marks partial results. Filesystem coverage must be understood in light of these exclusions and notes.
+
+
+## WhyDown v0.6.0: collection coverage and new diagnostic rules
+
+Additive JSON fields (the schema version remains **2**):
+- Top-level `journal_checked` (boolean): true only when journalctl completed successfully; false if journal logs were not verified.
+- `system.disk_usage_checked` (boolean): true when df supplied at least one recognized filesystem entry; false means the disk capacity query was incomplete or unavailable.
+- `system.root_filesystem_read_only` (boolean or null): true for root mount options `ro`, false for `rw`, null if the root mount cannot be established from the current mount namespace. This reflects the visible namespace, not every mount.
+- The existing `collection_notes` remain the source of granular missing/partial collector explanations. Text and HTML add an explicit COLLECTION COVERAGE section.
+
+When no rule matches but critical collectors (journal, disk capacity for system focus, systemd managers for service focus, or DNS/route data for network focus) are unavailable, `INSUFFICIENT_EVIDENCE` with `scope=unverified` replaces `NO_CLASSIFIED_ANOMALY`. These are informational, not fault warnings.
+
+New finding IDs: `ROOT_FILESYSTEM_READ_ONLY` (informational current snapshot), `CPU_CONTENTION_PRESSURE` (informational current snapshot for very high sustained CPU PSI), and `FD_EXHAUSTION_LOGS` (historical journal warning). Classified event kind `file_handle_exhaustion` is added with a source identifier but no raw journal message. Journal service window `boot_relation` may be `current_boot_filtered` when boot-scoped collection was confirmed, otherwise the previous uptime estimates/unknown remain available.
