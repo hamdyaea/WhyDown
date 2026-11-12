@@ -5,7 +5,7 @@
 WhyDown inspects common Linux failure signals, groups observations into actionable findings, and reconstructs a short timeline of events. It helps answer **"What failed, and what should I check next?"** without sending your system data to a cloud service.
 
 > [!IMPORTANT]
-> **Status: v0.5.3 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
+> **Status: v0.6.0 — early technical release.** WhyDown does **not** prove root causes, repair your system, or replace detailed investigation. Its rule-based journal classification may miss relevant events or produce false positives. Use suggested checks to confirm every hypothesis.
 
 ## Highlights
 
@@ -18,6 +18,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 - **Temporal scope:** distinguishes current kernel route/interface snapshots from historical journal observations; live internet connectivity is never probed.
 - **Comparable JSON schema v2:** warning counts by scope, network incident subjects and emitting programs for multi-distribution analysis.
 - **Service diagnostics (v0.3.1):** separate system/user systemd failed-unit snapshots, plus historical service-message windows that distinguish log entries from independent failures.
+- **Accurate evidence and incident attribution (v0.6.0):** fix detection of interface names ending in a colon in kernel journal messages; validate literal DNS nameserver addresses; clearly distinguish missing core evidence from a completed diagnostic with no matching anomalies; expose root mount read-only status and explicit file-descriptor exhaustion events.
 - **Clean progress/report boundaries (v0.5.3):** stops the live progress renderer before writing stdout or announcing a saved file, then emits the final 100% line only on success. Prevents merged terminal text such as `elapsed 1sWhyDown 0.5.2`; interrupted writes are not marked successful.
 - **Fast and inspectable filesystem collection (v0.5.2):** ignore network mounts and known network-backed FUSE types during default disk/inode checks, including rclone/OneDrive. Use `--include-remote-mounts` to explicitly include them (can stall); keep valid partial `df` output and record actual elapsed time for each subprocess in the report.
 - **Live diagnostic progress (v0.5.1):** an animated visual progress bar on interactive terminals, stage count, current collector name and elapsed time; default auto/TTY detection, `--progress` force and `--no-progress` suppression. Always uses standard error, never stdout or report JSON.
@@ -48,7 +49,7 @@ WhyDown inspects common Linux failure signals, groups observations into actionab
 On Linux x86_64 or Raspberry Pi OS 64-bit / Debian ARM64, download the installer, **review it** and run it as your normal user (not with sudo). Static musl is selected by default:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.5.3/scripts/install.sh -o whydown-install.sh
+curl -fL https://raw.githubusercontent.com/hamdyaea/WhyDown/v0.6.0/scripts/install.sh -o whydown-install.sh
 less whydown-install.sh
 sh whydown-install.sh
 ~/.local/bin/whydown --version
@@ -110,7 +111,7 @@ Download the [latest GitHub Release](https://github.com/hamdyaea/WhyDown/release
 Example for x86_64 Linux (including Manjaro):
 
 ```bash
-VERSION=v0.5.3
+VERSION=v0.6.0
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE="whydown-${VERSION}-${TARGET}.tar.gz"
 BASE="https://github.com/hamdyaea/WhyDown/releases/download/${VERSION}"
@@ -190,7 +191,7 @@ cd ~/WhyDown
 mv Cargo.lock ../WhyDown-Cargo.lock.backup
 git pull --ff-only
 cargo build --release
-./target/release/whydown --version   # expects whydown 0.5.3
+./target/release/whydown --version   # expects whydown 0.6.0
 ```
 
 Do **not** use `git reset --hard`, `git clean -fd`, or `git stash -u` as a generic workaround: they can discard unrelated local work. The `mv` command above preserves your local lockfile. If you have other modifications, inspect `git status` before updating.
@@ -270,7 +271,7 @@ whydown diagnose --format json --output report.json
 ### Example terminal output
 
 ```text
-WhyDown 0.5.3 [DEMO]
+WhyDown 0.6.0 [DEMO]
 ====================================================================
 Generated : 2026-11-11T20:00:00Z
 System    : Demo Linux 1.0 (fictional)
@@ -320,6 +321,21 @@ This output is **illustrative**. Timestamps and the exact number/order of findin
 | Memory pressure | `journalctl` | Detects OOM-related messages |
 | Storage errors | `journalctl` | Detects common kernel/application storage error strings |
 | Interface error counters | `/proc/net/dev` | Reports cumulative RX/TX error counters (not rates) |
+
+### Evidence completeness and safer incident interpretation (v0.6.0)
+
+A report with no recognized errors can still be incomplete. WhyDown now tracks whether the journal and filesystem capacity were actually queried. If no rule matches **and** core collectors were unavailable, it emits `INSUFFICIENT_EVIDENCE` (info, scope `unverified`) instead of `NO_CLASSIFIED_ANOMALY`. A visible **COLLECTION COVERAGE** section in text/HTML and additional JSON fields make unavailable data explicit. An optional sensor being absent is *never* proof that the corresponding subsystem is healthy.
+
+The kernel journal parser now correctly extracts colon-suffixed interface identifiers such as `wlan0:` and `enp3s0:` from explicit link-loss messages. Previously the colon was stripped before a test for the colon, making that extraction path unreachable. This improves attribution for many drivers; messages with no explicit interface remain correctly labeled `unknown` rather than guessed.
+
+The resolver parser now requires a syntactically valid IPv4 or IPv6 literal in a `nameserver` directive; arbitrary words are no longer counted as working DNS configuration. This is only a **configuration syntax check**, not an active DNS probe or proof that a nameserver is reachable.
+
+The system focus also reports whether the visible root mount is `ro` or `rw` according to `/proc/self/mountinfo`. `ROOT_FILESYSTEM_READ_ONLY` is informational because immutable OS images and containers can deliberately use a read-only root. Explicit `too many open files` / `file table overflow` messages produce historical `FD_EXHAUSTION_LOGS` warnings independently of the kernel-global file-handle snapshot. High sustained CPU PSI `some avg60 >=90%` produces the **informational** `CPU_CONTENTION_PRESSURE` finding; intentional heavy workloads are not necessarily faults. `--current-boot` journal incident windows are now labeled `current_boot_filtered` when journalctl successfully applied the boot filter, rather than using a clock/uptime estimate.
+
+```bash
+whydown diagnose --focus all --current-boot --max-events 5000 --progress
+whydown diagnose --focus network --since 2h --format json
+```
 
 ### Filesystem collection and diagnosing slow runs (v0.5.2)
 
@@ -411,14 +427,14 @@ WhyDown **never executes** either `dpkg --configure -a` or `apt-get -f install`.
 
 ## Cross-distribution testing (v0.3.0)
 
-WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro has been tested interactively through v0.4.0 (native x86_64 musl installer, SHA-256, current-boot network/services/system report and JSON export); v0.4.1 native pacman database check has been manually validated as passed via both WhyDown and pacman -Dk on Manjaro; v0.5.0 sensor testing on real hardware remains pending. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports on this VM are still pending; user-service diagnostics were subsequently checked successfully with the normal `hamdy` account (zero failed user units). The v0.3.6 dpkg rule was subsequently **validated live** on the same Debian 13 VM: `--focus all` and `--focus system` both reported `DPKG_INCOMPLETE_PACKAGES` with exactly four affected kernel packages, matching `dpkg --audit` (three unpacked and one half-configured). The diagnostic independently reported zero failed system and user systemd units. JSON/HTML export checks on this VM are still pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
+WhyDown provides a common report format for comparing Manjaro, Raspberry Pi OS, Debian, CachyOS, Ubuntu Server and Kali Purple. **Manjaro x86_64 has been manually tested through v0.5.3:** static-musl installation and SHA-256 verification, interactive progress without interleaved report lines, current-boot network/services/system diagnostics, resource PSI/memory/inode snapshots, native pacman consistency, auxiliary dpkg, JSON export and per-collector timings. A representative v0.5.3 run completed in around 2 seconds, reported zero failed system/user units and two historical log warnings (link loss and lightdm), not verified ongoing failures. The v0.6.0 rule changes still require a live Manjaro validation. Raspberry Pi OS 64-bit (Debian 12, ARM64, kernel 6.12.115+rpt-rpi-v8) compiled and ran service diagnostics with v0.3.3/v0.3.4. The v0.3.4 GNU binary failed at runtime with `GLIBC_2.39 not found`; the v0.3.5 static-musl installer has now been tested successfully on real Raspberry Pi hardware: ARM64 target detection, archive download, SHA-256 verification, installation under `~/.local/bin`, version check, and service diagnosis all passed.** A Debian 13 (Trixie) x86_64 virtual machine has also been manually tested with the v0.3.5 static-musl installer and text diagnostics for `all`, `network`, `services` and `system` as root. It identified `enp0s3` as up, local IPv4/IPv6 default routes, and zero failed system units. The root session's user systemd manager was **unavailable, not verified healthy**. A separate APT/dpkg kernel-package failure was not detected because package-manager transaction diagnostics are not implemented. JSON/HTML exports on this VM are still pending; user-service diagnostics were subsequently checked successfully with the normal `hamdy` account (zero failed user units). The v0.3.6 dpkg rule was subsequently **validated live** on the same Debian 13 VM: `--focus all` and `--focus system` both reported `DPKG_INCOMPLETE_PACKAGES` with exactly four affected kernel packages, matching `dpkg --audit` (three unpacked and one half-configured). The diagnostic independently reported zero failed system and user systemd units. JSON/HTML export checks on this VM are still pending. Other distributions and ARM64 devices remain untested. See the [validation matrix](docs/TEST_MATRIX.md).
 
 ```bash
 whydown diagnose --since 24h --max-events 5000 --format json --output report.json
 python3 -m json.tool report.json >/dev/null
 ```
 
-**JSON schema:** `schema_version` remains `2` in v0.5.3 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
+**JSON schema:** `schema_version` remains `2` in v0.6.0 (the breaking transition from v1 occurred in v0.3.0). New optional fields include `system.failed_user_units`, `system.system_units_checked`, and `service_event_windows`. Reports include `summary`, `findings[].scope`, optional `source`/`subject`, kernel interface `operstate`, and per-interface incident subjects. See [JSON report schema v2](docs/REPORT_SCHEMA.md). `operstate=up` does not establish internet reachability.
 
 ## Reliable automation and bounded collection (v0.4.0)
 
@@ -497,10 +513,11 @@ GitHub Actions runs Rust tests, Clippy, a release build and demo smoke tests. Th
 - **v0.5.1 (released):** interactive progress bar with animated heartbeat, completed-stage percentage, current command and elapsed time; separate stderr output and opt-in/out flags, with tests and no JSON schema changes.
 - **v0.5.2 (released):** default local-only disk and inode collection excluding common remote/FUSE backends, optional remote scan, partial df results preserved, precise per-collector timing telemetry in all report formats (local-only; no network transmission).
 - **v0.5.3 (released):** prevent progress/JSON or progress/text collisions and duplicate completion lines, keeping the final 100% status conditional on successfully written output; validate Manjaro v0.5.2 field timings.
+- **v0.6.0 (released):** fix kernel interface attribution, validate DNS IP literals, distinguish missing evidence from no anomaly, record boot-filtered incident provenance, and add informational root/CPU observations plus historical file descriptor exhaustion classification.
 - **v0.5 (planned):** terminal UI, richer explanatory evidence, broader cross-distribution fixtures, safe evidence bundles and configurable diagnostic rules.
 - **Future:** optional local model explanations and broader Linux diagnosis, *never at the expense of verifiable evidence*.
 
-Features not implemented in v0.5.3: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
+Features not implemented in v0.6.0: continuous monitoring, live network health checks, predictive failures, auto-repair, system-wide event tracing, package history correlation, privileged packet capture, external DNS probing, and cloud dashboards.
 
 ## Contributing
 

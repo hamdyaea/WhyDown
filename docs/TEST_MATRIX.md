@@ -137,3 +137,21 @@ Installer verified `whydown 0.5.2`. A complete `--focus all --current-boot --sin
 Two historical journal warnings were recorded: a kernel network link disconnect and a lightdm.service failure message. At the current snapshot `wlan0` was up, IPv4/IPv6 default routes were present and the system/user failed-unit counts were both zero. These warnings do not verify ongoing incidents. The previously long v0.5.0 run was not timed per collector, so its exact cause remains unknown.
 
 The v0.5.2 log also shows a progress line abutting the start of the report (`elapsed 1sWhyDown 0.5.2`). v0.5.3 adds an explicit progress-renderer pause/join before output and a clean final line after successful completion. Automated ordering checks are included, but manual validation in an interactive terminal is still pending.
+
+
+## Manjaro x86_64: v0.5.3 live validation (2026-11-12)
+
+The user installed the x86_64 musl binary v0.5.3 after Git fast-forward and SHA-256 verification. The complete `--focus all --current-boot --since 24h --max-events 5000 --progress` report was displayed **without the previous progress/report text collision**. It identified `wlan0` up, both default routes present, zero systemd failed system/user units, healthy pacman database, no incomplete auxiliary dpkg packages, and host CPU/memory/I/O PSI/inode observations.
+
+The two warnings were **historical journal events**, not active-fault proof: one kernel network link loss (interface not attributable from the retained event) and one lightdm.service failure message, with both unit manager snapshots currently at 0 failed units. Collector timings were systemd 25+25ms, pacman 1354ms, dpkg 25ms, df 50+50ms and journalctl 201ms. The manual test confirms the progress-output coordination fix and current snapshot behavior in v0.5.3.
+
+## v0.6.0 correctness regression plan
+
+- Pure journal fixture: `wlan0:` deauthentication and `enp3s0:` kernel link down must attribute each interface; ambiguous messages must stay unknown.
+- Resolver fixture: malformed `nameserver` values must not count as valid DNS, whereas IPv4/IPv6/scoped IPv6 addresses count.
+- Evidence completeness fixture: if critical journal or capacity collector is unverified and there are no positive findings, use informational `INSUFFICIENT_EVIDENCE`, never a clean-check interpretation. Verified healthy synthetic fixtures retain `NO_CLASSIFIED_ANOMALY`.
+- Root mountinfo fixture: distinguish read-only from read-write root without touching mounts; intentional read-only roots get informational findings only.
+- Journal fixture: classify explicit file descriptor exhaustion messages and never export raw sensitive log text.
+- PSI fixture: high sustained CPU contention should be informational rather than an automatic failure.
+- Rendering fixture: text/JSON/HTML include coverage states and accurately label successfully boot-filtered journal incident windows.
+- Real v0.6.0 tests on Manjaro, Raspberry Pi OS, Debian and other distributions are **pending**; do not claim validation from v0.5.3 hardware logs.

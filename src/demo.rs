@@ -44,6 +44,8 @@ pub fn snapshot() -> Snapshot {
             mountpoint: "/".into(), used_percent: 18,
         }],
         raid_health: vec![],
+        root_filesystem_read_only: Some(false),
+        disk_usage_checked: true,
         disks: vec![DiskUsage { mountpoint: "/".into(), used_percent: 64 }],
         disk_breakdowns: vec![],
         events: vec![
@@ -52,6 +54,7 @@ pub fn snapshot() -> Snapshot {
             Event { timestamp: now.saturating_sub(225), kind: EventKind::DnsProblem, subject: None, source: Some("systemd-resolved".into()) },
             Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
         ],
+        journal_checked: true,
         journal_current_boot_only: false,
         collector_timings: vec![CollectorTiming {
             name: "demo fixture", elapsed_ms: 0, succeeded: true,

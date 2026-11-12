@@ -2,6 +2,27 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.6.0] - 2026-11-12
+
+### Diagnostic correctness
+- Fix an unreachable network-interface extraction branch for kernel messages such as `wlan0:` / `enp3s0:`: the original code removed a trailing colon before checking whether it was present. Regression fixtures confirm distinct interfaces are attributed without preserving raw journal text.
+- Validate `nameserver` addresses in resolv.conf as IPv4/IPv6 literals rather than counting arbitrary text as configured DNS. Scoped IPv6 link-local addresses are accepted.
+- Explicitly track successful journal collection and filesystem usage collection; when **no anomaly matches but core sources are unavailable**, emit informational `INSUFFICIENT_EVIDENCE` instead of `NO_CLASSIFIED_ANOMALY`. A new COLLECTION COVERAGE section in text/HTML and additive JSON-v2 fields show what's been checked.
+- When `--current-boot` is successfully applied by journalctl, label historical incident windows `current_boot_filtered` rather than an approximate wall-clock/uptime-derived relation.
+
+### New read-only signals
+- Inspect root mount `ro` / `rw` flags from the visible `/proc/self/mountinfo`; a read-only root is **informational**, because immutable operating systems or containers can intentionally use it.
+- Classify explicit file descriptor exhaustion messages such as `Too many open files` and `file table overflow` as historical `FD_EXHAUSTION_LOGS` warnings, independently of the global file-nr limit. No raw message bodies retained.
+- Informational `CPU_CONTENTION_PRESSURE` for extremely high sustained CPU PSI some avg60 (>=90%); intentional compute-intensive work is not automatically faulty.
+
+### Tests and platform evidence
+- Add parser, engine and report rendering regressions for network attribution, invalid/IPv6 DNS, incomplete evidence, read-only root, file descriptors, CPU PSI and exact boot filtering.
+- Manjaro v0.5.3 field evidence: static-musl binary ran and progress completed cleanly; pacman database consistent, 0 currently failed system/user units, two historical journal warnings, and per-collector timings around 1.3s pacman / 0.2s journal. This does not confirm v0.6.0 on-host behavior.
+
+### Compatibility and limitations
+- Read-only/offline operation, no privileged changes or network probes, no new third-party Rust runtime dependencies. JSON `schema_version` remains 2 with additive fields.
+- These changes increase accuracy but do not cover every distro, service framework, hardware fault or application-specific failure.
+
 ## [0.5.3] - 2026-11-12
 
 ### Fixed

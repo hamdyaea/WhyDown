@@ -18,11 +18,11 @@ jobs:
         with:
           components: clippy
       - name: Run tests
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
       - name: Lint
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release --locked
       - name: Guided installer smoke test (no network)
         run: sh tests/install_smoke.sh
       - name: Demo smoke test

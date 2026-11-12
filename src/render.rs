@@ -171,6 +171,20 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
+    writeln!(out, "COLLECTION COVERAGE (unavailable is not healthy)").unwrap();
+    writeln!(out, "  Journal: {}", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    if report.focus.includes(Focus::System) {
+        writeln!(out, "  Filesystem capacity: {}", if report.snapshot.disk_usage_checked { "queried" } else { "not verified" }).unwrap();
+        writeln!(out, "  Root mount: {}", match report.snapshot.root_filesystem_read_only {
+            Some(true) => "read-only", Some(false) => "read-write", None => "not verified"
+        }).unwrap();
+    }
+    if report.focus.includes(Focus::Services) {
+        writeln!(out, "  Systemd system units: {}", if report.snapshot.system_units_checked { "queried" } else { "not verified" }).unwrap();
+        writeln!(out, "  Systemd user units: {}", if report.snapshot.failed_user_units.is_some() { "queried" } else { "not verified" }).unwrap();
+    }
+    writeln!(out).unwrap();
+
     if !report.snapshot.collector_timings.is_empty() {
         writeln!(out, "COLLECTOR TIMINGS (measured wall time)").unwrap();
         for timing in &report.snapshot.collector_timings {
@@ -197,6 +211,12 @@ pub fn text(report: &Report) -> String {
 /// Derived from wall clock minus uptime, not a journal boot ID; clock changes
 /// can make this estimate inaccurate.
 fn boot_relation(report: &Report, start: u64, end: u64) -> &'static str {
+    // journalctl --boot=0 already filters to the running boot. Do not
+    // downgrade verified boot selection to an uptime-based heuristic.
+    if report.snapshot.journal_current_boot_only
+        && report.snapshot.journal_checked && !report.demo {
+        return "current_boot_filtered";
+    }
     let Some(uptime) = report.snapshot.uptime_seconds else { return "unknown"; };
     let cutoff = report.generated_at.saturating_sub(uptime);
     if end < cutoff { "before_current_boot_estimate" }
@@ -301,6 +321,7 @@ pub fn json(report: &Report) -> String {
         ("generated_at", js(utc_timestamp(report.generated_at))),
         ("lookback_seconds", n(report.lookback_seconds)),
         ("journal_current_boot_only", JsonValue::Bool(s.journal_current_boot_only)),
+        ("journal_checked", JsonValue::Bool(s.journal_checked)),
         ("focus", js(report.focus.as_str())),
         ("demo", JsonValue::Bool(report.demo)),
         ("summary", object(vec![
@@ -314,6 +335,8 @@ pub fn json(report: &Report) -> String {
             ("os", js(s.os.clone())),
             ("kernel", js(s.kernel.clone())),
             ("uptime_seconds", opt_num(s.uptime_seconds)),
+            ("disk_usage_checked", JsonValue::Bool(s.disk_usage_checked)),
+            ("root_filesystem_read_only", opt_bool(s.root_filesystem_read_only)),
             ("ipv4_default_route", opt_bool(s.ipv4_default_route)),
             ("ipv6_default_route", opt_bool(s.ipv6_default_route)),
             ("dns_nameservers", opt_num(s.dns_nameservers.map(|v| v as u64))),
@@ -595,6 +618,17 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         }
         out.push_str("</div>");
     }
+    out.push_str("<h2>Collection coverage</h2><p class=\"muted\">Unverified does not mean healthy.</p><ul>");
+    write!(out, "<li>Journal: {}</li>", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    if report.focus.includes(Focus::System) {
+        write!(out, "<li>Filesystem capacity: {}</li>",
+            if report.snapshot.disk_usage_checked { "queried" } else { "not verified" }).unwrap();
+        write!(out, "<li>Root filesystem mount: {}</li>",
+            match report.snapshot.root_filesystem_read_only {
+                Some(true) => "read-only", Some(false) => "read-write", None => "not verified"
+            }).unwrap();
+    }
+    out.push_str("</ul>");
     if !report.snapshot.collector_timings.is_empty() {
         out.push_str("<h2>Collector timings</h2><p class=\"muted\">Actual elapsed time for each local subprocess; no estimated ETA.</p><ul>");
         for timing in &report.snapshot.collector_timings {
@@ -618,6 +652,19 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn coverage_and_incomplete_checks_are_explicit_in_all_formats() {
+        let report = engine::analyze(crate::model::Snapshot::default(), 3600, Focus::All, false);
+        assert_eq!(report.findings[0].id, "INSUFFICIENT_EVIDENCE");
+        assert!(text(&report).contains("COLLECTION COVERAGE"));
+        assert!(text(&report).contains("not verified"));
+        let j = json(&report);
+        assert!(j.contains("\"journal_checked\": false"));
+        assert!(j.contains("\"disk_usage_checked\": false"));
+        assert!(j.contains("\"root_filesystem_read_only\": null"));
+        assert!(html(&report).contains("Collection coverage"));
+    }
 
     #[test]
     fn collector_timings_remain_in_reports_without_raw_output() {
@@ -701,6 +748,17 @@ mod tests {
         assert!(!plain.contains("1 events"));
         let html_page = html(&report);
         assert!(html_page.contains("1 classified entry; 0 without unit attribution."));
+    }
+
+    #[test]
+    fn requested_current_boot_is_verified_when_journal_was_collected() {
+        let mut report = engine::analyze(demo::snapshot(), 3_600, Focus::All, false);
+        report.snapshot.journal_current_boot_only = true;
+        report.snapshot.journal_checked = true;
+        report.snapshot.uptime_seconds = None;
+        assert_eq!(boot_relation(&report, 100, 200), "current_boot_filtered");
+        report.snapshot.journal_checked = false;
+        assert_eq!(boot_relation(&report, 100, 200), "unknown");
     }
 
     #[test]
