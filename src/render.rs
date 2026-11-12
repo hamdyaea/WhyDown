@@ -17,6 +17,9 @@ pub fn text(report: &Report) -> String {
         report.lookback_seconds / 60,
         count_word((report.lookback_seconds / 60) as usize, "minute", "minutes"),
         if report.snapshot.journal_current_boot_only { " (current boot only)" } else { "" }).unwrap();
+    if report.snapshot.journal_truncated {
+        writeln!(out, "Journal   : PARTIAL — only newest {} entries examined", report.snapshot.journal_entries_examined).unwrap();
+    }
     writeln!(out, "Findings  : {}", report.findings.len()).unwrap();
     writeln!(out).unwrap();
 
@@ -172,7 +175,12 @@ pub fn text(report: &Report) -> String {
     }
 
     writeln!(out, "COLLECTION COVERAGE (unavailable is not healthy)").unwrap();
-    writeln!(out, "  Journal: {}", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    if report.snapshot.journal_truncated {
+        writeln!(out, "  Journal: PARTIAL (newest {} entries only; earlier records omitted)",
+            report.snapshot.journal_entries_examined).unwrap();
+    } else {
+        writeln!(out, "  Journal: {}", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    }
     if report.focus.includes(Focus::System) {
         writeln!(out, "  Filesystem capacity: {}", if report.snapshot.disk_usage_checked { "queried" } else { "not verified" }).unwrap();
         writeln!(out, "  Root mount: {}", match report.snapshot.root_filesystem_read_only {
@@ -322,6 +330,8 @@ pub fn json(report: &Report) -> String {
         ("lookback_seconds", n(report.lookback_seconds)),
         ("journal_current_boot_only", JsonValue::Bool(s.journal_current_boot_only)),
         ("journal_checked", JsonValue::Bool(s.journal_checked)),
+        ("journal_truncated", JsonValue::Bool(s.journal_truncated)),
+        ("journal_entries_examined", n(s.journal_entries_examined as u64)),
         ("focus", js(report.focus.as_str())),
         ("demo", JsonValue::Bool(report.demo)),
         ("summary", object(vec![
@@ -619,7 +629,12 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         out.push_str("</div>");
     }
     out.push_str("<h2>Collection coverage</h2><p class=\"muted\">Unverified does not mean healthy.</p><ul>");
-    write!(out, "<li>Journal: {}</li>", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    if report.snapshot.journal_truncated {
+        write!(out, "<li>Journal: PARTIAL — newest {} entries only; earlier records omitted</li>",
+            report.snapshot.journal_entries_examined).unwrap();
+    } else {
+        write!(out, "<li>Journal: {}</li>", if report.snapshot.journal_checked { "queried" } else { "not verified" }).unwrap();
+    }
     if report.focus.includes(Focus::System) {
         write!(out, "<li>Filesystem capacity: {}</li>",
             if report.snapshot.disk_usage_checked { "queried" } else { "not verified" }).unwrap();
@@ -652,6 +667,22 @@ mod tests {
     use super::*;
     use crate::{demo, engine};
     use crate::model::Focus;
+
+    #[test]
+    fn truncated_journal_is_visible_in_text_json_and_html() {
+        let snapshot = crate::model::Snapshot {
+            journal_checked: true,
+            journal_truncated: true,
+            journal_entries_examined: 500,
+            ..crate::model::Snapshot::default()
+        };
+        let report = engine::analyze(snapshot, 86400, Focus::All, false);
+        assert!(text(&report).contains("PARTIAL — only newest 500 entries examined"));
+        let structured = json(&report);
+        assert!(structured.contains("\"journal_truncated\": true"));
+        assert!(structured.contains("\"journal_entries_examined\": 500"));
+        assert!(html(&report).contains("Journal: PARTIAL"));
+    }
 
     #[test]
     fn coverage_and_incomplete_checks_are_explicit_in_all_formats() {

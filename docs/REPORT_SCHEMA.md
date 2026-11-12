@@ -117,3 +117,14 @@ Additive JSON fields (the schema version remains **2**):
 When no rule matches but critical collectors (journal, disk capacity for system focus, systemd managers for service focus, or DNS/route data for network focus) are unavailable, `INSUFFICIENT_EVIDENCE` with `scope=unverified` replaces `NO_CLASSIFIED_ANOMALY`. These are informational, not fault warnings.
 
 New finding IDs: `ROOT_FILESYSTEM_READ_ONLY` (informational current snapshot), `CPU_CONTENTION_PRESSURE` (informational current snapshot for very high sustained CPU PSI), and `FD_EXHAUSTION_LOGS` (historical journal warning). Classified event kind `file_handle_exhaustion` is added with a source identifier but no raw journal message. Journal service window `boot_relation` may be `current_boot_filtered` when boot-scoped collection was confirmed, otherwise the previous uptime estimates/unknown remain available.
+
+
+## WhyDown v0.6.1: bounded journal completeness
+
+JSON schema remains **2**. New top-level fields:
+- `journal_truncated` (boolean): true only if journalctl returned at least one entry **beyond** the `--max-events` analysis limit, using a read-only N+1 sentinel. A false value does not imply comprehensive historical log retention, only no truncation observed under the chosen journalctl filters.
+- `journal_entries_examined` (integer): number of selected journal lines examined, not the number of classified failure events.
+
+Default `--max-events` is now **5000** (configurable up to 10000). The collector requests `--lines=N+1`, discards an older sentinel if present and classifies the newest N. The selected `--since` and `--current-boot` filters still apply; inaccessible/expired logs and events outside the time window remain unknown.
+
+A truncated window is marked **PARTIAL** in text/HTML. If it yielded no recognized anomaly, it results in informational `INSUFFICIENT_EVIDENCE` rather than `NO_CLASSIFIED_ANOMALY`. If one or more other findings exist, an informational `JOURNAL_WINDOW_TRUNCATED` finding is added alongside them (scope `unverified`); the other observations are still valid within the sampled tail.

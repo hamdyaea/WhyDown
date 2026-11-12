@@ -155,3 +155,18 @@ The two warnings were **historical journal events**, not active-fault proof: one
 - PSI fixture: high sustained CPU contention should be informational rather than an automatic failure.
 - Rendering fixture: text/JSON/HTML include coverage states and accurately label successfully boot-filtered journal incident windows.
 - Real v0.6.0 tests on Manjaro, Raspberry Pi OS, Debian and other distributions are **pending**; do not claim validation from v0.5.3 hardware logs.
+
+
+## Manjaro v0.6.0: different event limits, different incident results (2026-11-12)
+
+The user installed v0.6.0 on Manjaro x86_64 (static-musl, SHA-256 passed). The `--focus all --current-boot --since 24h --max-events 5000` run reported **two historical** observations: `LINK_DISCONNECTS` attributable to `wlan0` and `SERVICE_FAILURE_LOGS` attributable to `lightdm.service`. There were zero current system/user systemd failed units. Collection coverage showed journal, disk and systemd queried and root mount read-write.
+
+The next JSON run used the same scope **but no explicit `--max-events`**, so the previous default of 500 was used. That report had no classified journal incidents and said only the newest 500 journal entries were examined; older events were potentially excluded. Both outputs are consistent with different journal sampling limits. It is **not evidence of spontaneous recovery**. The JSON report also recorded /home 88% and /opt 86% disk utilization, beneath the existing 90% warning threshold.
+
+### v0.6.1 regression and manual validation plan
+
+- Default CLI journal limit 5000; explicit 1–10000 bounds remain unchanged
+- N-entry journal is **not** truncated, N+1 entries are truncated; newest N remain eligible for classification, one older sentinel is discarded
+- Truncation plus no matched anomalies yields `INSUFFICIENT_EVIDENCE`; truncation plus matched warning retains the warning and emits `JOURNAL_WINDOW_TRUNCATED` info
+- Text, JSON, HTML expose the sampling status and number of examined entries; JSON schema remains 2, no raw journal lines retained
+- Manually compare text and JSON using identical `--since`, `--current-boot` and `--max-events` arguments on Manjaro after v0.6.1 release. No on-host v0.6.1 validation yet.

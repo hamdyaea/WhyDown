@@ -53,7 +53,7 @@ impl Default for Cli {
             command: Command::Diagnose,
             focus: Focus::All,
             since_seconds: 86_400,
-            max_events: 500,
+            max_events: 5_000,
             format: OutputFormat::Text,
             output: None,
             overwrite: false,
@@ -201,7 +201,7 @@ COMMANDS
 OPTIONS
   --focus VALUE    all | network | services | system (default: all)
   --since VALUE    journal lookback: 30m | 24h | 7d (default: 24h)
-  --max-events N   maximum journal entries examined (default: 500)
+  --max-events N   maximum journal entries examined (default: 5000; max: 10000)
   --current-boot   restrict journal observations to the current boot
   --exit-on-warning  exit with code 1 if any WARNING was found (default: 0)
   --progress       force live diagnostic progress on stderr (even without TTY)
@@ -238,6 +238,7 @@ mod tests {
         let c = Cli::parse(Vec::<String>::new()).unwrap();
         assert_eq!(c.command, Command::Diagnose);
         assert_eq!(c.since_seconds, 86_400);
+        assert_eq!(c.max_events, 5_000);
     }
 
     #[test]

@@ -23,20 +23,26 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         // Do not present a "no anomaly" finding when core collectors were
         // unavailable. Missing optional sensors still remain explicitly unknown.
         let mut unavailable = Vec::new();
-        if !snapshot.journal_checked { unavailable.push("journalctl not verified"); }
+        if !snapshot.journal_checked { unavailable.push("journalctl not verified".to_string()); }
+        if snapshot.journal_truncated {
+            unavailable.push(format!(
+                "journal window truncated: only newest {} entries examined",
+                snapshot.journal_entries_examined
+            ));
+        }
         if focus.includes(Focus::System) && !snapshot.disk_usage_checked {
-            unavailable.push("filesystem capacity not verified");
+            unavailable.push("filesystem capacity not verified".to_string());
         }
         if focus.includes(Focus::Services) && !snapshot.system_units_checked
             && snapshot.failed_user_units.is_none() {
-            unavailable.push("systemd units not verified");
+            unavailable.push("systemd units not verified".to_string());
         }
         if focus.includes(Focus::Network) &&
             snapshot.ipv4_default_route.is_none() && snapshot.ipv6_default_route.is_none() {
-            unavailable.push("network routes not verified");
+            unavailable.push("network routes not verified".to_string());
         }
         if focus.includes(Focus::Network) && snapshot.dns_nameservers.is_none() {
-            unavailable.push("DNS configuration not verified");
+            unavailable.push("DNS configuration not verified".to_string());
         }
         if unavailable.is_empty() {
             findings.push(Finding {
@@ -55,10 +61,27 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
                 confidence: Confidence::Limited,
                 title: "Core diagnostic collection was incomplete".into(),
                 explanation: "WhyDown cannot determine whether a known rule matches when core evidence is unavailable. This is not a positive health check or a confirmed system fault.".into(),
-                evidence: unavailable.into_iter().map(str::to_string).collect(),
+                evidence: unavailable,
                 checks: vec!["Review COLLECTION LIMITATIONS and permissions; rerun only the relevant focus after resolving collector access".into()],
             });
         }
+    } else if snapshot.journal_truncated {
+        // Warnings or other findings remain valid, but the journal may
+        // contain additional earlier incidents that were not examined.
+        findings.push(Finding {
+            id: "JOURNAL_WINDOW_TRUNCATED",
+            severity: Severity::Info,
+            confidence: Confidence::Limited,
+            title: "Journal analysis covered only the newest entries".into(),
+            explanation: "The journal window contains more entries than the selected limit. Existing findings are based on the examined tail only, and earlier incidents may be missing.".into(),
+            evidence: vec![format!(
+                "Newest {} journal entries examined; at least one older entry excluded",
+                snapshot.journal_entries_examined
+            )],
+            checks: vec![
+                "Increase --max-events up to 10000 or narrow --since to inspect an earlier time window".into(),
+            ],
+        });
     }
 
     let network_incidents = if focus.includes(Focus::Network) {
@@ -722,6 +745,40 @@ mod tests {
         };
         let report = analyze(snapshot, 60, Focus::Network, true);
         assert!(!report.findings.iter().any(|f| f.id == "ROUTE_MISSING" || f.id == "IPV4_ROUTE_MISSING"));
+    }
+
+    #[test]
+    fn truncated_journal_without_matching_rules_is_incomplete_evidence() {
+        let report = analyze(Snapshot {
+            journal_checked: true,
+            journal_truncated: true,
+            journal_entries_examined: 500,
+            disk_usage_checked: true,
+            ..Snapshot::default()
+        }, 86400, Focus::System, false);
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].id, "INSUFFICIENT_EVIDENCE");
+        assert!(report.findings[0].evidence.iter().any(|item| item.contains("500")));
+    }
+
+    #[test]
+    fn truncated_journal_with_a_real_warning_preserves_warning_and_notes_partial_scope() {
+        let report = analyze(Snapshot {
+            journal_checked: true,
+            journal_truncated: true,
+            journal_entries_examined: 500,
+            events: vec![Event {
+                timestamp: 1_700_000_000,
+                kind: EventKind::FileHandleExhaustion,
+                source: Some("app".into()), subject: None,
+            }],
+            ..Snapshot::default()
+        }, 86400, Focus::System, false);
+        assert!(report.findings.iter().any(|f| f.id == "FD_EXHAUSTION_LOGS"));
+        let limited = report.findings.iter()
+            .find(|f| f.id == "JOURNAL_WINDOW_TRUNCATED").unwrap();
+        assert_eq!(limited.scope(), "unverified");
+        assert_eq!(limited.severity, Severity::Info);
     }
 
     #[test]

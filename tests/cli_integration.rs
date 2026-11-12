@@ -34,6 +34,8 @@ fn json_output_has_schema_fields() {
     assert!(output.contains("\"failed_user_units\""));
     assert!(output.contains("\"system_units_checked\""));
     assert!(output.contains("\"journal_checked\": true"));
+    assert!(output.contains("\"journal_truncated\": false"));
+    assert!(output.contains("\"journal_entries_examined\": 4"));
     assert!(output.contains("\"disk_usage_checked\": true"));
     assert!(output.contains("\"root_filesystem_read_only\": false"));
     assert!(output.contains("\"dpkg_checked\": true"));

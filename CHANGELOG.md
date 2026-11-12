@@ -2,6 +2,23 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.6.1] - 2026-11-12
+
+### Fixed
+- Increase the default maximum journal tail from 500 to 5,000 (CLI still allows 1–10,000) to reduce missed historical incidents in busy journals.
+- Request `--lines=N+1` from journalctl and analyze only the newest N. The extra entry acts as a **sentinel**, allowing exact distinction between an N-entry window and actual truncation.
+- Record `journal_truncated` and `journal_entries_examined` in additive JSON schema v2 fields. Terminal and HTML reports explicitly mark truncated journal coverage as **PARTIAL**.
+- When no diagnostic rule matches but journal entries were excluded by the limit, emit informational `INSUFFICIENT_EVIDENCE` instead of `NO_CLASSIFIED_ANOMALY`. When other findings exist, retain them and add informational `JOURNAL_WINDOW_TRUNCATED` to warn that older incidents may also exist.
+- Add deterministic regression tests for N vs N+1 journal lines, quiet journal, limited journal with and without classified findings, CLI defaults, and all report formats.
+
+### Manjaro v0.6.0 field evidence
+- Installation of the x86_64-musl package with SHA-256 validation passed and interactive progress completed cleanly. A `--max-events 5000` current-boot report on kernel `7.2.9-1-MANJARO` correctly attributed one historical WLAN disconnect to `wlan0`, identified one historical lightdm unit failure, and observed zero currently failed system and user units. Root mount was read-write.
+- A JSON invocation seconds later omitted `--max-events`, so v0.6.0 used its **500-line default**. The JSON reported `NO_CLASSIFIED_ANOMALY` and explicitly noted that older journal entries might be missing. This result **does not contradict** the longer scan.
+- v0.6.1 journal-sampling behavior still requires a new on-host test. No claim is made that either earlier journal warning represents an ongoing failure.
+
+### Compatibility
+- No privilege escalation, package changes, network probes, telemetry or raw log exports. `schema_version` remains 2 with additive fields. Report findings can now include an informational coverage notice.
+
 ## [0.6.0] - 2026-11-12
 
 ### Diagnostic correctness

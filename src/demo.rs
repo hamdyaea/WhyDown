@@ -55,6 +55,8 @@ pub fn snapshot() -> Snapshot {
             Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
         ],
         journal_checked: true,
+        journal_truncated: false,
+        journal_entries_examined: 4,
         journal_current_boot_only: false,
         collector_timings: vec![CollectorTiming {
             name: "demo fixture", elapsed_ms: 0, succeeded: true,

@@ -45,7 +45,8 @@ impl Finding {
             | "FILE_HANDLE_LIMIT_NEAR" | "INODE_NEAR_FULL"
             | "MD_RAID_DEGRADED" | "ROOT_FILESYSTEM_READ_ONLY"
             | "CPU_CONTENTION_PRESSURE" => "current_snapshot",
-            "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE" => "unverified",
+            "NO_CLASSIFIED_ANOMALY" | "INSUFFICIENT_EVIDENCE"
+            | "JOURNAL_WINDOW_TRUNCATED" => "unverified",
             _ => "historical_journal",
         }
     }
@@ -322,6 +323,10 @@ pub struct Snapshot {
     pub events: Vec<Event>,
     /// True only when journalctl completed successfully; empty logs may still be valid.
     pub journal_checked: bool,
+    /// True if at least one older entry was omitted after collecting limit + 1.
+    pub journal_truncated: bool,
+    /// Number of journal entries actually examined (not classified-event count).
+    pub journal_entries_examined: usize,
     /// True when journalctl was invoked with --boot=0.
     pub journal_current_boot_only: bool,
     pub notes: Vec<String>,
@@ -360,6 +365,8 @@ impl Default for Snapshot {
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
             journal_checked: false,
+            journal_truncated: false,
+            journal_entries_examined: 0,
             journal_current_boot_only: false,
             notes: Vec::new(),
             collector_timings: Vec::new(),
