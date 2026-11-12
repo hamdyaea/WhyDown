@@ -1,6 +1,7 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
 use crate::model::{DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, Snapshot};
+use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
@@ -8,7 +9,16 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Read-only collection without user-facing progress (library API compatibility).
 pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: bool, current_boot: bool) -> Snapshot {
+    let silent = Progress::new(ProgressMode::Never, 0);
+    collect_with_progress(focus, since_unix, max_events, disk_details, current_boot, &silent)
+}
+
+pub fn collect_with_progress(
+    focus: Focus, since_unix: u64, max_events: usize,
+    disk_details: bool, current_boot: bool, progress: &Progress,
+) -> Snapshot {
     let mut snapshot = Snapshot {
         os: read_os_name().unwrap_or_else(|| "Unknown Linux".into()),
         kernel: read_trimmed("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Unknown".into()),
@@ -22,6 +32,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
     };
 
     if focus.includes(Focus::Network) {
+        progress.begin("Inspecting network");
         match fs::read_to_string("/proc/net/route") {
             Ok(text) => snapshot.ipv4_default_route = Some(parse_ipv4_default_route(&text)),
             Err(_) => snapshot.notes.push("IPv4 routing table unavailable".into()),
@@ -39,6 +50,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
             Err(_) => snapshot.notes.push("Cannot inspect /etc/resolv.conf".into()),
         }
         if snapshot.dns_stub {
+            progress.detail("systemctl is-active systemd-resolved (max 20s)");
             snapshot.resolved_active = match run_capture("systemctl", &["is-active", "systemd-resolved.service"]) {
                 Ok((_, output)) => Some(output.trim() == "active"),
                 Err(_) => {
@@ -50,9 +62,12 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         if let Ok(contents) = fs::read_to_string("/proc/net/dev") {
             snapshot.interfaces = parse_interfaces(&contents);
         }
+        progress.complete_step();
     }
 
     if focus.includes(Focus::Services) {
+        progress.begin("Checking systemd services");
+        progress.detail("systemctl --failed (max 20s)");
         match run_capture("systemctl", &["list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
             Ok((true, output)) => {
                 snapshot.failed_units = parse_failed_units(&output);
@@ -63,18 +78,23 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         }
         // User and system units belong to separate systemd managers.
         // A missing user bus means unknown, not zero failed user units.
+        progress.detail("systemctl --user --failed (max 20s)");
         match run_capture("systemctl", &["--user", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"]) {
             Ok((true, output)) => snapshot.failed_user_units = Some(parse_failed_units(&output)),
             Ok((false, _)) => snapshot.notes.push("User systemd manager unavailable; user units not checked".into()),
             Err(_) => snapshot.notes.push("systemctl --user unavailable; user units not checked".into()),
         }
+        progress.complete_step();
     }
 
     if focus.includes(Focus::System) {
+        progress.begin("Checking storage and resource health");
+        progress.detail("Reading kernel memory, pressure and RAID snapshots");
         crate::health::collect_kernel(&mut snapshot);
         // pacman -Dk checks local package database consistency without any
         // sync/installation/removal, and only when pacman's DB is present.
         if fs::metadata("/var/lib/pacman/local").is_ok() {
+            progress.detail("pacman -Dk (max 20s)");
             snapshot.pacman_checked = Some(false);
             match run_capture("pacman", &["-Dk"]) {
                 Ok((success, _)) => {
@@ -89,6 +109,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         // Read the package database via dpkg-query's stable, machine-readable
         // status abbreviation. Do not invoke apt/dpkg configuration commands.
         if fs::metadata("/var/lib/dpkg/status").is_ok() {
+            progress.detail("dpkg-query (max 20s)");
             snapshot.dpkg_checked = Some(false);
             match run_capture("dpkg-query",
                 &["--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\n"]) {
@@ -104,6 +125,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
                     "dpkg status database found but dpkg-query unavailable; package health not verified".into()),
             }
         }
+        progress.detail("df -PT (max 20s)");
         match run_capture("df", &["-PT"]) {
             Ok((true, output)) => snapshot.disks = parse_df(&output),
             _ => snapshot.notes.push("Filesystem usage unavailable".into()),
@@ -112,6 +134,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         // from df -PT to avoid false alarms from immutable image filesystems.
         let mounts: Vec<String> = snapshot.disks.iter().map(|d| d.mountpoint.clone()).collect();
         if !mounts.is_empty() {
+            progress.detail("df -Pi (max 20s)");
             match run_capture("df", &["-Pi"]) {
                 Ok((true, output)) =>
                     snapshot.inode_health = crate::health::parse_inodes(&output, &mounts),
@@ -128,6 +151,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
                 snapshot.notes.push("Disk details: no eligible near-full non-root mountpoint to inspect".into());
             }
             for path in paths {
+                progress.detail("du --max-depth=2 (max 120s; optional disk details)");
                 match run_capture("du", &["-x", "-k", "--max-depth=2", "--", path.as_str()]) {
                     Ok((ok, output)) => {
                         let entries = parse_du(&output, &path);
@@ -144,8 +168,11 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
                 }
             }
         }
+        progress.complete_step();
     }
 
+    progress.begin("Reading journal entries");
+    progress.detail("journalctl (max 45s)");
     let since_arg = format!("--since=@{since_unix}");
     let count_arg = format!("--lines={max_events}");
     let mut journal_args = vec!["--no-pager", "--output=short-unix"];
@@ -174,6 +201,7 @@ pub fn collect(focus: Focus, since_unix: u64, max_events: usize, disk_details: b
         )),
     }
 
+    progress.complete_step();
     snapshot
 }
 
