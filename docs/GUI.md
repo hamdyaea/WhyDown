@@ -63,6 +63,28 @@ Python or Tkinter. Normal installation leaves the applications menu unchanged.
 4. Optional: click **Save private JSON report** to export exactly the analyzed
    snapshot. Nothing is automatically written or transmitted.
 
+### Copy just the text you need
+
+In **Findings & evidence** and **Coverage & limits**, highlight any portion
+of the explanatory text with your mouse (one line or several), then:
+
+- Press **Ctrl+C**, or right-click the highlighted text and choose
+  **Copy selected text**, or press **Copy selection** at the bottom.
+- Use **Ctrl+A** or right-click **Select all text** only when you want the
+  complete text of the current detail/coverage pane, not the entire report.
+- In **Timeline** or the findings list, select a row and press **Ctrl+C**,
+  right-click **Copy selected row(s)**, or click **Copy selection**. Rows
+  are copied as tab-separated columns.
+- Only the selected passage or row goes to the **local system clipboard**.
+  Nothing is copied automatically and no report file is created. If the
+  text selection is empty, WhyDown shows an explanatory message instead
+  of copying the entire report.
+
+This is especially useful for sharing a short, relevant log finding or
+suggested check without exporting the full JSON report. The clipboard may
+contain hostnames, service names, mountpoints and other local identifiers,
+so review before pasting into a public issue or message.
+
 ### Settings
 
 - **Focus:** all (recommended) / network / services / system.
