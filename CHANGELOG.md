@@ -2,7 +2,7 @@
 
 All notable changes to WhyDown will be documented here.
 
-## [Unreleased]
+## [0.8.0] - 2026-11-12
 
 ### Added
 - Introduce a read-only interactive terminal mode (`whydown tui`) with a number-and-Enter menu for focus/lookback/current-boot configuration, per-finding evidence and suggested checks, classified timeline, collection limitations and copyable report commands.
@@ -10,6 +10,10 @@ All notable changes to WhyDown will be documented here.
 - Require interactive stdin and stdout for TUI use, rejecting pipelines and automation, as well as incompatible export/monitoring flags. No raw terminal mode, new dependencies or external `stty` invocation.
 - Sanitize terminal control characters in evidence strings before display; invalidate stale reports after changing scope.
 - Add TUI unit tests and integration tests for interactive navigation, demonstration isolation, EOF, unsafe output combinations and non-terminal execution.
+
+### Validation
+- Local and GitHub CI tests cover interactive navigation, evidence browsing, fictional-mode isolation, EOF, stale-report invalidation, terminal control character sanitization, and non-TTY safety. Strict Clippy with `-D warnings` and optimized release build passed on Linux CI before release.
+- Manual validation of the published v0.8.0 executable on a real Manjaro interactive terminal remains pending; the automated tests do not replace it.
 
 ### Compatibility
 - Preserve normal `whydown diagnose` / `demo` text, JSON v2 and HTML output, exit codes, read-only behavior and all v0.7.1 diagnostics.
