@@ -2,6 +2,18 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.4.1] - 2026-11-12
+
+### Added
+- Read-only `pacman -Dk` local package database consistency check on hosts with `/var/lib/pacman/local`, covering native Arch Linux, Manjaro and CachyOS systems.
+- Current-snapshot warning `PACMAN_DATABASE_CHECK_FAILED` for nonzero pacman exit codes (limited confidence: not proof of corruption); separate `pacman_checked` and `pacman_consistent` fields in JSON schema v2, plus terminal and HTML display.
+- Clear label that a dpkg database on Manjaro is a separate, auxiliary check and does not verify pacman.
+- Regression tests for successful, failing and unavailable pacman database checks, including report formats.
+- Record successful field test of v0.4.0 on Manjaro: static-musl x86_64 installer, SHA-256, current-boot diagnostics, JSON export and zero exit status for no warnings. The new v0.4.1 pacman check still requires on-host testing.
+
+### Compatibility
+- Existing dpkg handling and rules unchanged. `schema_version` remains 2 with additive fields. No network probes, package changes, third-party crates, privileged actions or raw package logs.
+
 ## [0.4.0] - 2026-11-12
 
 ### Added
