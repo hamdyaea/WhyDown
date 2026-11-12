@@ -4,7 +4,7 @@
 
 | Platform | Architecture | Manual test status | Targeted checks |
 | --- | --- | --- | --- |
-| Manjaro | x86_64 | v0.4.0 static-musl install and SHA-256 passed; current-boot all-focus report showed wlan0 up, IPv4/IPv6 routes present, 0 failed system/user units; JSON saved, return code 0 with no warnings. **v0.4.1 pacman check still needs on-host testing.** | NetworkManager, XFS /var, pacman local DB, reboots |
+| Manjaro | x86_64 | **v0.4.1 tested live:** binary install/sha passed; pacman database check passed and matched pacman -Dk; optional dpkg check independently reported 0. v0.5.0 host resource probes still need a manual run. | NetworkManager, XFS /var, pacman local DB, reboots |
 | Raspberry Pi OS 64-bit (Debian 12) | aarch64 | v0.3.3/v0.3.4 source builds passed; v0.3.5 static-musl installer and service diagnostic **passed on hardware**; v0.3.4 GNU ABI issue documented | systemd, headless ARM, low-power disk I/O |
 | Debian 13 (Trixie) VM | x86_64 | **v0.3.6 dpkg detection validated live**: `all` and `system` reported exactly four incompletely configured kernel packages previously confirmed by `dpkg --audit`; zero failed system/user units. Static-musl installation and previous text diagnostics also tested. JSON/HTML exports pending | systemd, DHCP, dpkg package-state integrity, virtual NIC `enp0s3` |
 | CachyOS | x86_64 | Planned | custom kernel, Arch packaging |
@@ -104,3 +104,12 @@ The finding was `DPKG_INCOMPLETE_PACKAGES`, severity `WARN`, scope `current_snap
 - The system also exposed a dpkg database reporting 0 incomplete states, **not a valid pacman health check**. v0.4.1 adds a separate native pacman check.
 - A JSON report was saved with `--exit-on-warning`; its exit code was 0 (no warning), as expected. The warning exit code 1 was not manually tested on Manjaro; automated tests cover it.
 - Pending: actual v0.4.1 pacman output on Manjaro/CachyOS, HTML export and failure-injection checks.
+
+
+## Manjaro x86_64 — v0.4.1 native pacman check validated (2026-11-12)
+
+User installed v0.4.1 via the default x86_64-musl installer, with successful SHA-256 validation. The `--focus system --current-boot --since 24h` report on kernel `7.2.9-1-MANJARO` showed `CURRENT PACMAN LOCAL DATABASE CHECK: consistency check passed`. A separate manual `pacman -Dk` command returned no database errors. The optional dpkg database also reported 0 incomplete states but is correctly labeled as dpkg-only. Collection was limited to the newest 500 journal events. **This establishes pacman database check behavior, not comprehensive system health.**
+
+## v0.5.0 resource sensor manual test plan
+
+Run `whydown diagnose --focus system --current-boot --since 24h` and `whydown diagnose --format json --output resource-report.json` on each target distribution. Compare host metrics with `cat /proc/meminfo`, `cat /proc/pressure/{cpu,memory,io}`, `cat /proc/sys/fs/file-nr`, `df -Pi`, and `cat /proc/mdstat` where those interfaces exist. Do not fabricate outages or intentionally exhaust RAM, inodes, file handles or RAID members on production machines; rely on deterministic parser fixtures for fault cases. Real host tests of v0.5.0 are pending.
