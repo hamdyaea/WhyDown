@@ -221,6 +221,11 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
     if o.metric != "service" && o.unit.is_some() {
         return Err("--unit is valid only for --metric service".into());
     }
+    if args.iter().any(|a| a == "--path") &&
+        !matches!(o.metric.as_str(), "all" | "disk" | "inodes" |
+            "disk_used_pct" | "inode_used_pct") {
+        return Err("--path applies only to disk/inodes checks or --metric all".into());
+    }
     if o.record.as_ref().is_some_and(|p| p.as_os_str().is_empty() || p.to_str() == Some("-")) {
         return Err("--record requires a real file path".into());
     }
@@ -612,6 +617,7 @@ mod tests {
             vec!["--metric","service"],
             vec!["--unit","sshd.service"],
             vec!["--metric","service","--unit","sshd.service;touch"],
+            vec!["--metric","memory","--path","/srv"],
 
             vec!["--shell"],
         ] {
