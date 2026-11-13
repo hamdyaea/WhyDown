@@ -8,7 +8,7 @@ Consumers must check `schema_version` and should compare the same `focus` and `l
 - `schema_version`: integer, `2`
 - `tool`, `version`, `generated_at` (UTC ISO 8601), `lookback_seconds`, `focus`, `demo`
 - `summary`: `warning_count`, `info_count`, `current_warnings`, `historical_warnings`, `active_connectivity_probed` (always `false`)
-- `system`: OS/kernel, uptime, routes, local DNS configuration, failed systemd units, interfaces with counters and optional `operstate`, disks and optional directory breakdowns
+- `system`: OS/kernel, uptime, routes, local DNS configuration, failed systemd units, interfaces with counters and optional `operstate`, disks and optional directory breakdowns. `system.service_statuses[]` adds nullable `exec_main_status` and `exec_start_status` (from the structured systemd ExecStart command; not necessarily the main process) to distinguish control-command failures.
 - `findings`: `id`, `severity`, `confidence`, `scope`, `title`, `explanation`, `evidence`, `checks`
 - `network_incidents`: historical event clusters, including `subject` (identified network interface, or `null`) and start/end times
 - `timeline`: `timestamp`, `kind`, `label`, `subject`, `source`, nullable `diagnostic_hint` and `journal_messages` (array of original message bodies, empty unless opted in); subject/source/hint are `null` when unavailable
