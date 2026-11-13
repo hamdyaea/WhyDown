@@ -1269,17 +1269,17 @@ mod tests {
     #[test]
     fn targeted_unit_journal_retains_application_fatal_message_not_unrelated_lines() {
         let general = concat!(
-            "1794499328.0 kali systemd[1]: nessusd.service: Main process exited, code=exited, status=1/FAILURE\\n",
-            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\\n",
-            "1794499328.2 kali systemd[1]: vboxadd-service.service: Failed with result 'exit-code'.\\n"
+            "1794499328.0 kali systemd[1]: nessusd.service: Main process exited, code=exited, status=1/FAILURE\n",
+            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\n",
+            "1794499328.2 kali systemd[1]: vboxadd-service.service: Failed with result 'exit-code'.\n"
         );
         let (_, mut contexts) = parse_journal_with_context_and_messages(general, true);
         let unit_journal = concat!(
-            "1794499300.0 kali nessus-service[764]: nessus-service [764][INFO] : Nessus started\\n",
-            "1794499328.0 kali nessus-service[764]: nessus-service [764][ERR] : Exiting: nessusd had too many fatal errors.\\n",
-            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\\n",
-            "1794499100.0 kali nessus-service[764]: too old fatal error\\n",
-            "1794499350.0 kali nessus-service[764]: future fatal error\\n"
+            "1794499300.0 kali nessus-service[764]: nessus-service [764][INFO] : Nessus started\n",
+            "1794499328.0 kali nessus-service[764]: nessus-service [764][ERR] : Exiting: nessusd had too many fatal errors.\n",
+            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\n",
+            "1794499100.0 kali nessus-service[764]: too old fatal error\n",
+            "1794499350.0 kali nessus-service[764]: future fatal error\n"
         );
         append_targeted_unit_journal_messages(&mut contexts, "nessusd.service", unit_journal);
         let nessus = contexts.iter().find(|ctx|
