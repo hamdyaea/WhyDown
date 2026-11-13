@@ -828,6 +828,7 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for (marker, label) in [
         ("status=", "exit_status"),
+        ("code=", "process_code"),
         ("reason=", "reason"),
         ("reason: ", "reason"),
         ("failed with result ", "systemd_result"),
@@ -880,6 +881,9 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
                                 "exit-code" | "signal" | "core-dump" | "timeout"
                                 | "start-limit-hit" | "resources" | "protocol"
                                 | "watchdog" | "oom-kill" | "success") => Some(value),
+                    "process_code" if matches!(kind, EventKind::ServiceFailure) &&
+                        matches!(value.to_ascii_lowercase().as_str(),
+                            "exited" | "killed" | "dumped") => Some(value),
                     "errno" if digits(&value, 4) => Some(value),
                     _ => None,
                 };
@@ -960,12 +964,29 @@ pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContex
             continue;
         }
         let subject = event_subject(body, kind);
-        if seen.insert((unix, kind.as_str(), subject.clone())) {
-            if let Some(signal) = diagnostic_signal(body, kind) {
+        // Merge *whitelisted diagnostic indicators* across different journal
+        // lines describing the same incident in the same second. The
+        // classified event itself remains deduplicated. In particular,
+        // "Main process exited ... status=24" and "Failed with result
+        // 'exit-code'" are complementary evidence, not separate incidents.
+        // Raw journal text, URLs and command arguments are never copied.
+        let signal = diagnostic_signal(body, kind);
+        if let Some(signal) = signal {
+            if let Some(context) = contexts.iter_mut().find(|ctx: &&mut EventContext|
+                ctx.timestamp == unix && ctx.kind == kind && ctx.subject == subject) {
+                for marker in signal.split("; ") {
+                    if !context.signal.split("; ").any(|old| old == marker) {
+                        let joined = format!("{}; {}", context.signal, marker);
+                        if joined.len() <= 160 { context.signal = joined; }
+                    }
+                }
+            } else {
                 contexts.push(EventContext {
                     timestamp: unix, kind, subject: subject.clone(), signal,
                 });
             }
+        }
+        if seen.insert((unix, kind.as_str(), subject.clone())) {
             events.push(Event {
                 timestamp: unix, kind, subject, source,
             });
