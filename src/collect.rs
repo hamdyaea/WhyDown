@@ -867,7 +867,12 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
         lower.contains("start request repeated too quickly") {
         parts.push("start_limit=hit".into());
     }
-    if parts.is_empty() { None } else { Some(parts.into_iter().take(4).collect::<Vec<_>>().join("; ")) }
+    if parts.is_empty() {
+        None
+    } else {
+        // Whitelisted markers only, capped for bounded JSON and clipboard use.
+        Some(parts.into_iter().take(4).collect::<Vec<_>>().join("; ").chars().take(160).collect())
+    }
 }
 
 /// Parse journalctl short-unix output into bounded classified events.
