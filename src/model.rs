@@ -333,14 +333,17 @@ pub struct CollectorTiming {
     pub succeeded: bool,
 }
 
-/// Optional, strictly whitelisted fault/status codes extracted from classified
-/// journal lines. No original messages, hostnames, addresses or arguments.
+/// A classified event's safe diagnostic codes and, on explicit request only,
+/// bounded original journal messages. Messages can contain secrets and must
+/// never be collected by the default library/report path.
 #[derive(Debug, Clone)]
 pub struct EventContext {
     pub timestamp: u64,
     pub kind: EventKind,
     pub subject: Option<String>,
     pub signal: String,
+    /// Up to three message bodies, each limited to 240 characters.
+    pub journal_messages: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

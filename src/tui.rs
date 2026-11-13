@@ -169,9 +169,9 @@ fn diagnose_now(cli: &Cli, demo_mode: bool) -> Report {
         demo::snapshot()
     } else {
         let silent = Progress::new(ProgressMode::Never, 0);
-        collect::collect_with_options(
+        collect::collect_with_options_and_messages(
             cli.focus, since, cli.max_events, cli.disk_details,
-            cli.current_boot, cli.include_remote_mounts, &silent,
+            cli.current_boot, cli.include_remote_mounts, cli.journal_messages, &silent,
         )
     };
     if demo_mode {
@@ -281,6 +281,16 @@ fn timeline<R: BufRead, W: Write>(
                 time::utc_timestamp(event.timestamp),
                 safe(event.kind.label()),
                 event.subject.as_deref().map(|s| format!(" [{}]", safe(s))).unwrap_or_default())?;
+            if let Some(ctx) = report.snapshot.event_contexts.iter().find(|ctx|
+                ctx.timestamp == event.timestamp && ctx.kind == event.kind
+                    && ctx.subject == event.subject) {
+                if !ctx.signal.is_empty() {
+                    writeln!(output, "    Diagnostic: {}", safe(&ctx.signal))?;
+                }
+                for message in &ctx.journal_messages {
+                    writeln!(output, "    Journal (sensitive): {}", safe(message))?;
+                }
+            }
         }
         if report.timeline.len() > 25 {
             writeln!(output, "Showing latest 25 / {} classified events. Use JSON for all.", report.timeline.len())?;
