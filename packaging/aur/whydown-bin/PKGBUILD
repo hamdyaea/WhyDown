@@ -16,10 +16,12 @@ sha256sums_x86_64=('30f506293953ea1976a1384c6c31b0016f619af3b8aa35269b1f2ecec9cf
 sha256sums_aarch64=('95a269a710f70faf485ae8051edc40c1e88d0a59f780ff458b814c3beb9ae7a7')
 
 check() {
+  cd "$srcdir"
   ./whydown --version | grep -Fx "whydown ${pkgver}"
 }
 
 package() {
+  cd "$srcdir"
   install -Dm755 whydown "$pkgdir/usr/bin/whydown"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/whydown/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/whydown/README.md"
