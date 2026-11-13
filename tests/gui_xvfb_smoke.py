@@ -109,7 +109,23 @@ try:
     assert gui.save_button.isEnabled()
     assert gui.tabs.currentIndex() == 0
     assert gui.findings.topLevelItemCount() >= 1
-    assert "OBSERVED EVIDENCE" in gui.detail.toPlainText()
+    assert gui.tabs.tabText(0) == "Incident overview"
+    assert gui.tabs.tabText(1) == "Incident details"
+    first = gui.findings.topLevelItem(0)
+    assert first.text(0) in ("WARNING", "INFO")
+    assert first.text(1)
+    assert "Double-click" in gui.overview_preview.toPlainText()
+    # Simulate an actual double-click in the Qt incident table.
+    gui.findings.scrollToItem(first)
+    rect = gui.findings.visualItemRect(first)
+    QtTest.QTest.mouseDClick(
+        gui.findings.viewport(), QtCore.Qt.MouseButton.LeftButton,
+        pos=rect.center())
+    app.processEvents()
+    assert gui.tabs.currentIndex() == 1, "Double-click must open the second page"
+    assert "INCIDENT IDENTIFICATION" in gui.detail.toPlainText()
+    assert "CLASSIFIED JOURNAL EVENTS" in gui.detail.toPlainText()
+    assert "SUGGESTED READ-ONLY CHECKS" in gui.detail.toPlainText()
     assert "COLLECTION COVERAGE" in gui.coverage.toPlainText()
 
     # Qt native text editor MUST be enabled/read-only, not disabled.
@@ -150,7 +166,7 @@ try:
     assert "Select a text passage" in gui.status.text()
 
     # Coverage can be selected and copied independently of findings.
-    gui.tabs.setCurrentIndex(2)
+    gui.tabs.setCurrentIndex(3)
     app.processEvents()
     cover_cursor = gui.coverage.textCursor()
     cover_cursor.setPosition(0)
@@ -161,12 +177,20 @@ try:
     assert app.clipboard().text() == expected
 
     # Timeline copying includes only user-selected rows as tab-separated text.
-    gui.tabs.setCurrentIndex(1)
+    gui.tabs.setCurrentIndex(2)
     app.processEvents()
     assert gui.events.topLevelItemCount() >= 1
     gui.events.setCurrentItem(gui.events.topLevelItem(0))
     assert gui.copy_selection()
     assert "\t" in app.clipboard().text()
+    # Double-click a classified timeline event for its individual safe indicators.
+    first_event = gui.events.topLevelItem(0)
+    gui.open_event(first_event)
+    assert gui.tabs.currentIndex() == 1
+    assert "CLASSIFIED JOURNAL EVENT" in gui.detail.toPlainText()
+    gui.back_button.click()
+    assert gui.tabs.currentIndex() == 0
+
     print("Qt6 GUI Xvfb smoke test: real mouse selection / Ctrl+C / toolbar copy passed")
 finally:
     gui.close()
