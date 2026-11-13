@@ -104,8 +104,7 @@ read-only verification commands. Nothing is repaired or uploaded.
 
 ## Nagios / Icinga monitoring and graphs
 
-Native plugin checks (0/1/2/3 exit codes, thresholds and performance data)
-and opt-in local SVG/HTML trend charts:
+Standard plugin states, thresholds, performance data and offline SVG/HTML charts:
 
 ```bash
 whydown nagios check --metric memory --warning 80 --critical 95
@@ -113,8 +112,7 @@ whydown nagios check --metric all --record /path/to/private/nagios.tsv
 whydown nagios dashboard --history /path/to/private/nagios.tsv --output dashboard.html
 ```
 
-Create the history directory first. See the [Nagios setup and graphing guide](docs/NAGIOS.md)
-for threshold details, Icinga/PNP4Nagios integration and individual SVG charts.
+Create the history directory first. See [Nagios setup](docs/NAGIOS.md).
 
 ## Update WhyDown
 
