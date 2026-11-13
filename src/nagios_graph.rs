@@ -97,7 +97,7 @@ pub fn parse_history(text: &str) -> Result<BTreeMap<&'static str, Vec<Point>>, S
         // History labels must be canonical, not ambiguous CLI command names.
         if fields[1] != spec.label { continue; }
         let Ok(timestamp) = fields[0].parse::<u64>() else { continue; };
-        if timestamp < 946_684_800 || timestamp > 4_102_444_800 { continue; }
+        if !(946_684_800..=4_102_444_800).contains(&timestamp) { continue; }
         let Ok(value) = fields[2].parse::<f64>() else { continue; };
         if !value.is_finite() || value < 0.0 || value > 100_000_000.0 { continue; }
         let state = match fields[3] {
@@ -351,7 +351,7 @@ mod tests {
         let graph = chart_svg(spec_for("memory").unwrap(), points);
         assert!(graph.contains("<polyline"));
         assert!(graph.contains("96.00%"));
-        assert!(graph.contains("17945") == false);
+        assert!(!graph.contains("17945"));
         let html = html_dashboard(&data, 24).unwrap();
         assert!(html.contains("Nagios monitoring"));
         assert!(html.contains("mem_used_pct"));
