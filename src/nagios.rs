@@ -30,6 +30,7 @@ USAGE
 CHECK METRICS
   all (default) | memory | swap | disk | inodes | load | cpu-psi
   memory-psi | io-psi | file-handles | route | dns | failed-units
+  service (requires --unit NAME; excluded from all)
 
 NAGIOS PLUGIN CONTRACT
   0 OK | 1 WARNING | 2 CRITICAL | 3 UNKNOWN
@@ -41,6 +42,7 @@ EXAMPLES
   whydown nagios check --metric memory --warning 80 --critical 95
   whydown nagios check --metric disk --path / --warning 85 --critical 95
   whydown nagios check --metric failed-units
+  whydown nagios check --metric service --unit sshd.service
   whydown nagios check --metric all --timeout 8
   whydown nagios check --metric all --record ~/.local/state/whydown/nagios.tsv
   whydown nagios graph --history nagios.tsv --metric mem_used_pct --output memory.svg
@@ -136,6 +138,8 @@ pub const SPECS: &[Spec] = &[
     Spec {choice:"route", label:"default_route", uom:"", warn:"1:", crit:"~:", max:Some(1.0)},
     Spec {choice:"dns", label:"dns_servers", uom:"", warn:"1:", crit:"~:", max:None},
     Spec {choice:"failed-units", label:"failed_units", uom:"", warn:"0", crit:"0:2", max:None},
+    // Specific named units require --unit and are not part of --metric all.
+    Spec {choice:"service", label:"service_active", uom:"", warn:"~:", crit:"1:", max:Some(1.0)},
 ];
 pub fn spec_for(choice: &str) -> Option<Spec> {
     SPECS.iter().find(|x| x.choice == choice || x.label == choice).copied()
@@ -147,6 +151,7 @@ pub struct Options {
     pub warning: Option<Range>,
     pub critical: Option<Range>,
     pub path: String,
+    pub unit: Option<String>,
     pub timeout: Duration,
     pub record: Option<PathBuf>,
     pub demo: bool,
@@ -155,7 +160,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self { metric: "all".into(), warning: None, critical: None,
-            path: "/".into(), timeout: Duration::from_secs(8),
+            path: "/".into(), unit: None, timeout: Duration::from_secs(8),
             record: None, demo: false, verbose: false }
     }
 }
@@ -174,7 +179,7 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
             "--demo" => o.demo = true,
             "--verbose" | "-v" => o.verbose = true,
             "--metric" | "--check" | "--warning" | "-w" | "--critical" | "-c" |
-            "--path" | "--timeout" | "--record" => {
+            "--path" | "--unit" | "--timeout" | "--record" => {
                 i += 1;
                 let value = args.get(i).ok_or_else(|| format!("{arg} requires a value"))?;
                 match arg.as_str() {
@@ -182,6 +187,7 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
                     "--warning" | "-w" => o.warning = Some(Range::parse(value)?),
                     "--critical" | "-c" => o.critical = Some(Range::parse(value)?),
                     "--path" => o.path = value.clone(),
+                    "--unit" => o.unit = Some(value.clone()),
                     "--timeout" => {
                         let seconds: u64 = value.parse().map_err(|_| "timeout must be an integer".to_owned())?;
                         if !(1..=60).contains(&seconds) { return Err("timeout must be 1..60 seconds".into()); }
@@ -204,6 +210,12 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
     if !o.path.starts_with('/') || o.path.len() > 255 ||
         o.path.chars().any(char::is_control) {
         return Err("--path must be an absolute filesystem path without control characters".into());
+    }
+    if o.metric == "service" && o.unit.as_deref().is_none_or(|name| !safe_unit(name)) {
+        return Err("--metric service requires a safe --unit NAME, e.g. sshd.service".into());
+    }
+    if o.metric != "service" && o.unit.is_some() {
+        return Err("--unit is valid only for --metric service".into());
     }
     if o.record.as_ref().is_some_and(|p| p.as_os_str().is_empty() || p.to_str() == Some("-")) {
         return Err("--record requires a real file path".into());
@@ -235,6 +247,13 @@ impl Sample {
         format!("'{}'={};{};{};0;{}",
                 self.spec.label, value, self.warning.raw, self.critical.raw, max)
     }
+}
+
+fn safe_unit(unit: &str) -> bool {
+    !unit.is_empty() && unit.len() <= 96 && !unit.contains("..")
+        && unit.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.@-".contains(&b))
+        && [".service", ".socket", ".mount", ".timer", ".target", ".path", ".swap"]
+            .iter().any(|suffix| unit.ends_with(suffix))
 }
 
 fn bounded_read(path: &str) -> Result<String, String> {
@@ -372,6 +391,27 @@ fn sample_value(choice: &str, options: &Options, remaining: Duration)
             Ok((count as f64,
                 "Valid literal nameserver entries in /etc/resolv.conf; resolver health NOT tested".into()))
         }
+        "service" => {
+            let unit = options.unit.as_deref().ok_or("service name not supplied")?;
+            let text = command_output("systemctl", &[
+                "show", "--no-pager",
+                "--property=LoadState,ActiveState,SubState,Result,NRestarts",
+                "--", unit
+            ], remaining)?;
+            let get = |key: &str| {
+                text.lines().find_map(|line| line.strip_prefix(key))
+                    .unwrap_or("unknown")
+            };
+            let active = get("ActiveState=");
+            let load = get("LoadState=");
+            let sub = get("SubState=");
+            if active == "unknown" || load == "unknown" {
+                return Err("systemctl returned incomplete unit state".into());
+            }
+            let up = active == "active" && load == "loaded";
+            Ok((if up { 1.0 } else { 0.0 },
+                format!("{unit}: LoadState={load}, ActiveState={active}, SubState={sub}; application readiness not verified")))
+        }
         "failed-units" => {
             let text = command_output("systemctl", &[
                 "--failed", "--no-pager", "--no-legend", "--plain"
@@ -404,6 +444,7 @@ fn demo_value(choice: &str) -> (f64, &'static str) {
         "route" => (1.0, "fictional default route present"),
         "dns" => (2.0, "fictional configured resolvers"),
         "failed-units" => (1.0, "fictional one failed systemd unit"),
+        "service" => (1.0, "fictional named service is active"),
         _ => (0.0, "fictional"),
     }
 }
@@ -411,7 +452,7 @@ fn demo_value(choice: &str) -> (f64, &'static str) {
 pub fn collect_samples(o: &Options) -> Vec<Sample> {
     let deadline = Instant::now() + o.timeout;
     let specs: Vec<_> = if o.metric == "all" {
-        SPECS.to_vec()
+        SPECS.iter().filter(|spec| spec.choice != "service").copied().collect()
     } else {
         spec_for(&o.metric).into_iter().collect()
     };
@@ -564,6 +605,10 @@ mod tests {
             vec!["--metric","disk","--path","../../etc"],
             vec!["--metric","disk","--timeout","0"],
             vec!["--record","-"],
+            vec!["--metric","service"],
+            vec!["--unit","sshd.service"],
+            vec!["--metric","service","--unit","sshd.service;touch"],
+
             vec!["--shell"],
         ] {
             assert!(parse_options(&bad.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_err(),
@@ -574,7 +619,7 @@ mod tests {
     fn demo_metrics_have_valid_status_perfdata_and_nonzero_states() {
         let mut opts = Options { demo: true, ..Options::default() };
         let all = collect_samples(&opts);
-        assert_eq!(all.len(), SPECS.len());
+        assert_eq!(all.len(), SPECS.len() - 1);
         assert_eq!(overall(&all), State::Warning);
         assert!(all.iter().all(|s| s.value.is_some() && !s.perfdata().contains('\n')));
         assert!(all.iter().any(|s| s.perfdata().starts_with("'mem_used_pct'=62.50%;80;95;0;100")));
