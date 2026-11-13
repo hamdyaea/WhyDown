@@ -768,7 +768,7 @@ mod tests {
             source: Some("systemd".into()),
         });
         let report = engine::analyze(snapshot, 3600, Focus::All, true);
-        assert!(text(&report).contains("active=active sub=running result=success NRestarts=1"));
+        assert!(text(&report).contains("active=active sub=running result=success exit_status=unknown transient=unknown desktop_launcher=false NRestarts=1"));
         let j = json(&report);
         assert!(j.contains("\"service_statuses\""));
         assert!(j.contains("\"n_restarts\": 1"));
