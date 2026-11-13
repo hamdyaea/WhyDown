@@ -225,6 +225,193 @@ def finding_details(f):
     lines.extend(["", "Observations are not proof of root cause or application readiness."])
     return "\n".join(lines)
 
+
+# Matching uses rule IDs rather than keywords from potentially sensitive logs.
+# Snapshot-only rules deliberately have no historical events attached.
+FINDING_EVENT_KINDS = {
+    "LINK_DISCONNECTS": ("link_disconnected",),
+    "DHCP_FAILURES": ("dhcp_problem",),
+    "DNS_FAILURES": ("dns_failure",),
+    "NETWORK_UNREACHABLE": ("network_unreachable",),
+    "LINK_BEFORE_DNS": ("link_disconnected", "dns_failure"),
+    "DHCP_BEFORE_DNS": ("dhcp_problem", "dns_failure"),
+    "WIFI_LOCAL_ROAM_OBSERVED": ("wifi_roam_start", "wifi_associated"),
+    "SERVICE_FAILURE_LOGS": ("service_failure",),
+    "SERVICE_RESTART_OBSERVED": ("service_restart_scheduled", "service_failure"),
+    "OOM_EVENTS": ("out_of_memory",),
+    "STORAGE_ERRORS": ("storage_error",),
+    "FD_EXHAUSTION_LOGS": ("file_handle_exhaustion",),
+    "USB_DISCONNECT_BURST": ("usb_disconnect",),
+    "USB_TRANSPORT_STATUS": ("usb_transport_error",),
+}
+
+
+def related_events(report, finding):
+    kinds = FINDING_EVENT_KINDS.get(finding.get("id"), ())
+    return [event for event in report.get("timeline", [])
+            if isinstance(event, dict) and event.get("kind") in kinds]
+
+
+def affected_targets(report, finding, events=None):
+    events = related_events(report, finding) if events is None else events
+    targets = sorted({str(e["subject"]) for e in events if e.get("subject")})
+    system = report.get("system") or {}
+    if finding.get("id") == "FAILED_SYSTEMD_UNITS":
+        targets = [str(x) for x in system.get("failed_units", [])]
+    elif finding.get("id") == "FAILED_USER_SYSTEMD_UNITS":
+        targets = [str(x) for x in system.get("failed_user_units") or []]
+    if len(targets) > 3:
+        return ", ".join(targets[:3]) + f" (+{len(targets)-3})"
+    return ", ".join(targets) if targets else "Not identified"
+
+
+def overview_row(report, finding):
+    events = related_events(report, finding)
+    first = events[0].get("timestamp", "—") if events else (
+        "Current state" if finding.get("scope") == "current_snapshot" else "—")
+    summary = (finding.get("evidence") or [finding.get("explanation", "")])[0]
+    return {
+        "severity": str(finding.get("severity", "?")).upper(),
+        "title": str(finding.get("title", "Finding")),
+        "affected": affected_targets(report, finding, events),
+        "observed": str(first),
+        "events": str(len(events)) if events else "—",
+        "preview": str(summary),
+    }
+
+
+def detailed_incident(report, finding):
+    """Human-readable dossier from actual collected data, never inferred causes.
+
+    All entries are already privacy-filtered by the Rust collector. A timeline
+    sample is not an exhaustive journal transcript, and current snapshots are
+    not evidence that a historical error persists.
+    """
+    events = related_events(report, finding)
+    row = overview_row(report, finding)
+    sysinfo = report.get("system") or {}
+    lines = [
+        str(finding.get("title", "Finding")), "",
+        "INCIDENT IDENTIFICATION",
+        f"Rule: {finding.get('id', 'unknown')}",
+        f"Severity: {row['severity']}",
+        f"Confidence: {finding.get('confidence', 'unknown')}",
+        f"Scope: {finding.get('scope', 'unknown')}",
+        f"Affected: {row['affected']}",
+        f"First matching event in retained timeline: {row['observed']}",
+        f"Matching events in retained timeline: {len(events)}",
+    ]
+    if events:
+        lines.append(f"Last matching event in retained timeline: {events[-1].get('timestamp', '?')}")
+    lines.extend(["", "WHAT WHYDOWN OBSERVED",
+                  str(finding.get("explanation", "")), "",
+                  "CLASSIFIED JOURNAL EVENTS (time / source / affected / safe diagnostic code)"])
+    if events:
+        for i, event in enumerate(events[-80:], 1):
+            lines.append(
+                f"{i:02d}  {event.get('timestamp', '?')}  "
+                f"{event.get('kind', '?')}  source={event.get('source') or 'unknown'}  "
+                f"subject={event.get('subject') or 'unknown'}")
+            signal = event.get("diagnostic_hint")
+            if signal:
+                lines.append(f"    Indicator: {signal}")
+        if len(events) > 80:
+            lines.append(f"Only the newest 80 matching timeline entries are displayed here (of {len(events)} retained).")
+    else:
+        lines.append("No event of this class is present in the retained timeline; "
+                     "this rule may be snapshot-only or older events may be outside the timeline.")
+    lines.extend(["", "SPECIFIC COLLECTED EVIDENCE"])
+    for evidence in finding.get("evidence") or []:
+        lines.append(" • " + str(evidence))
+    if not finding.get("evidence"):
+        lines.append(" No additional evidence recorded")
+
+    if finding.get("id") in (
+        "LINK_DISCONNECTS", "DHCP_FAILURES", "DNS_FAILURES",
+        "NETWORK_UNREACHABLE", "LINK_BEFORE_DNS", "DHCP_BEFORE_DNS",
+        "WIFI_LOCAL_ROAM_OBSERVED", "RECENT_INTERFACE_DROPS", "IFACE_ERROR_COUNTERS",
+        "ROUTE_MISSING", "IPV4_ROUTE_MISSING", "DNS_UNCONFIGURED", "DNS_STUB_INACTIVE",
+    ):
+        lines.extend(["", "CURRENT NETWORK SNAPSHOT (NOT VERIFIED AT INCIDENT TIME)"])
+        lines.extend([
+            f"IPv4 default route: {sysinfo.get('ipv4_default_route', 'unverified')}",
+            f"IPv6 default route: {sysinfo.get('ipv6_default_route', 'unverified')}",
+            f"Configured DNS nameserver count: {sysinfo.get('dns_nameservers', 'unverified')}",
+            f"systemd-resolved active: {sysinfo.get('resolved_active', 'unverified')}",
+        ])
+        known = {e.get("subject") for e in events if e.get("subject")}
+        for interface in sysinfo.get("interfaces") or []:
+            if not known or interface.get("name") in known:
+                lines.append(
+                    f" • {interface.get('name', '?')}: operstate={interface.get('operstate', '?')}, "
+                    f"rx_errors={interface.get('rx_errors', '?')}, "
+                    f"tx_errors={interface.get('tx_errors', '?')}, "
+                    f"rx_dropped={interface.get('rx_dropped', '?')}, "
+                    f"tx_dropped={interface.get('tx_dropped', '?')}")
+        for incident in (report.get("network_incidents") or [])[-12:]:
+            if known and incident.get("subject") not in known:
+                continue
+            lines.append(
+                f" • Incident cluster: {incident.get('subject') or 'unknown interface'} "
+                f"{incident.get('start', '?')} → {incident.get('end', '?')}: "
+                f"link={incident.get('link_events', 0)}, dhcp={incident.get('dhcp_events', 0)}, "
+                f"dns={incident.get('dns_events', 0)}, unreachable={incident.get('unreachable_events', 0)}")
+    elif finding.get("id") in (
+        "FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
+        "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED",
+    ):
+        lines.extend(["", "CURRENT SYSTEMD STATE (SEPARATE FROM HISTORICAL ERRORS)"])
+        if sysinfo.get("system_units_checked"):
+            failed = sysinfo.get("failed_units") or []
+            lines.append("Currently failed system units: " + (", ".join(map(str, failed)) or "none"))
+        else:
+            lines.append("Current system-unit query: unavailable")
+        user_failed = sysinfo.get("failed_user_units")
+        lines.append("Currently failed user units: "
+                     + (", ".join(map(str, user_failed)) if user_failed is not None else "not verified"))
+        for state in sysinfo.get("service_statuses") or []:
+            lines.append(
+                f" • {state.get('unit', '?')}: "
+                f"load={state.get('load_state', '?')}, "
+                f"active={state.get('active_state', '?')}, "
+                f"sub={state.get('sub_state', '?')}, "
+                f"result={state.get('result', '?')}, "
+                f"restarts={state.get('n_restarts', 'unknown')}")
+        for group in (report.get("service_event_windows") or [])[-12:]:
+            lines.append(
+                f" • Historical failure cluster: {group.get('start', '?')} → {group.get('end', '?')}, "
+                f"messages={group.get('entry_count', '?')}, "
+                f"units={', '.join(group.get('units') or []) or 'unattributed'}")
+
+    lines.extend(["", "SUGGESTED READ-ONLY CHECKS"])
+    for check in finding.get("checks") or []:
+        lines.append(" • " + str(check))
+    if not finding.get("checks"):
+        lines.append(" No specific check supplied")
+    lines.extend(["", "CONFIDENCE AND LIMITATIONS",
+                  "This is a local snapshot plus classified historical events, not a confirmed root cause.",
+                  "Current status may have changed since a historical incident.",
+                  "No raw journal messages or credentials are retained in this report.",
+                  "The timeline contains at most 300 recent classified events, not necessarily all incidents."])
+    if report.get("journal_truncated"):
+        lines.append("PARTIAL JOURNAL: older records were excluded by the event limit.")
+    if not report.get("journal_checked"):
+        lines.append("UNVERIFIED JOURNAL: journalctl was inaccessible or unavailable.")
+    return "\n".join(lines)
+
+
+def event_dossier(event):
+    lines = ["CLASSIFIED JOURNAL EVENT", "",
+             f"Time (UTC): {event.get('timestamp', 'unknown')}",
+             f"Category: {event.get('label', event.get('kind', 'unknown'))}",
+             f"Source: {event.get('source') or 'not identified'}",
+             f"Affected subject: {event.get('subject') or 'not identified'}",
+             f"Safe diagnostic indicator: {event.get('diagnostic_hint') or 'not available'}",
+             "", "The journal message itself was not retained for privacy.",
+             "A journal event does not prove that the fault is still present."]
+    return "\n".join(lines)
+
+
 def coverage_details(r):
     sysinfo = r.get("system") or {}
     lines = ["COLLECTION COVERAGE AND LIMITATIONS", "",
