@@ -28,6 +28,18 @@ fn nagios_checks_report_all_four_states_with_standards_compliant_perfdata() {
     assert_eq!(critical.status.code(), Some(2));
     assert!(String::from_utf8(critical.stdout).unwrap().starts_with("WHYDOWN CRITICAL DEMO -"));
 
+    let service = whydown(&["nagios","check","--metric","service",
+        "--unit","example-backup.service","--demo"]);
+    assert_eq!(service.status.code(), Some(0));
+    assert!(String::from_utf8(service.stdout).unwrap().contains("'service_active'=1.00;~:;1:;0;1"));
+    for invalid in [
+        vec!["nagios","--metric","service","--demo"],
+        vec!["nagios","--metric","service","--unit","example.service;rm","--demo"],
+        vec!["nagios","--metric","memory","--unit","example.service","--demo"],
+    ] {
+        assert_eq!(whydown(&invalid).status.code(), Some(3));
+    }
+
     let unknown = whydown(&["nagios","check","--metric","not-a-check","--demo"]);
     assert_eq!(unknown.status.code(), Some(3));
     assert!(String::from_utf8(unknown.stdout).unwrap().starts_with("WHYDOWN UNKNOWN -"));
