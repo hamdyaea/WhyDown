@@ -56,6 +56,7 @@ pub fn snapshot() -> Snapshot {
             Event { timestamp: now.saturating_sub(225), kind: EventKind::DnsProblem, subject: None, source: Some("systemd-resolved".into()) },
             Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
         ],
+        event_contexts: vec![],
         journal_checked: true,
         journal_truncated: false,
         journal_entries_examined: 4,
