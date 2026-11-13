@@ -170,3 +170,27 @@ A current `active_state=active` plus `sub_state=running` can support the stateme
   by known rule IDs/event types and display relevant current snapshot values.
   These are presentation changes to the existing `findings[]` and
   `system` structures, not additional validation of cause or recovery.
+
+## v0.12.1 — verified systemd manager and transient desktop context
+
+The additive `system.service_statuses[]` fields are:
+
+- `manager` — `"system"` or `"user"`, which manager actually returned
+  the validated unit state (never guessed solely from a service name).
+- `exec_main_status` — integer 0–255 or `null`, from
+  `systemctl show -p ExecMainStatus`.
+- `transient` — boolean or `null` if systemd did not report it.
+- `desktop_entry` — boolean indicating a known system-wide `.desktop`
+  launcher fragment, without retaining the private path.
+
+All existing `unit`, `load_state`, `active_state`, `sub_state`,
+`result`, `n_restarts` fields remain unchanged. `timeline[].diagnostic_hint`
+may contain several **independently whitelisted** status/result codes from
+lines for the same classified incident at the same timestamp; the event
+itself remains deduplicated.
+
+New informational finding `DESKTOP_LAUNCH_EXIT_LOGS` is emitted only for a
+narrow historical user-app launcher exit-24 situation with no currently
+failed user/system units; it is not proof of a successful GUI handoff and
+does not suppress unrelated service failures. The `schema_version` is
+unchanged at **2**.
