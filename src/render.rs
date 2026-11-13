@@ -188,14 +188,20 @@ pub fn text(report: &Report) -> String {
         writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} {})",
             report.timeline.len(), count_word(report.timeline.len(), "event", "events")).unwrap();
         for event in &report.timeline {
-            let indicator = report.snapshot.event_contexts.iter().find(|ctx|
+            let context = report.snapshot.event_contexts.iter().find(|ctx|
                 ctx.timestamp == event.timestamp && ctx.kind == event.kind
-                && ctx.subject == event.subject).map(|ctx| ctx.signal.as_str());
+                && ctx.subject == event.subject);
             writeln!(out, "  {}  {}{}{}{}",
                 utc_timestamp(event.timestamp), event.kind.label(),
                 event.subject.as_deref().map(|v| format!(" [{}]", v)).unwrap_or_default(),
                 event.source.as_deref().map(|v| format!(" via {}", v)).unwrap_or_default(),
-                indicator.map(|v| format!(" | {v}")).unwrap_or_default()).unwrap();
+                context.filter(|ctx| !ctx.signal.is_empty())
+                    .map(|ctx| format!(" | {}", ctx.signal)).unwrap_or_default()).unwrap();
+            if let Some(context) = context {
+                for message in &context.journal_messages {
+                    writeln!(out, "    Original journal message (sensitive): {message}").unwrap();
+                }
+            }
         }
         writeln!(out).unwrap();
     }
@@ -236,7 +242,11 @@ pub fn text(report: &Report) -> String {
         writeln!(out).unwrap();
     }
 
-    writeln!(out, "PRIVACY: no raw journal messages are included in this report.").unwrap();
+    if report.snapshot.event_contexts.iter().any(|ctx| !ctx.journal_messages.is_empty()) {
+        writeln!(out, "PRIVACY: this report includes original journal messages and may reveal secrets. Review before sharing.").unwrap();
+    } else {
+        writeln!(out, "PRIVACY: no original journal messages were retained (unless explicitly requested).").unwrap();
+    }
     writeln!(out, "CAUTION: findings are observations and hypotheses, not verified root causes.").unwrap();
     out
 }
@@ -498,9 +508,14 @@ pub fn json(report: &Report) -> String {
                 hint.timestamp == event.timestamp && hint.kind == event.kind &&
                 hint.subject == event.subject
             ) {
-                Some(hint) => js(hint.signal.clone()),
-                None => JsonValue::Null,
+                Some(hint) if !hint.signal.is_empty() => js(hint.signal.clone()),
+                _ => JsonValue::Null,
             }),
+            ("journal_messages", arr(s.event_contexts.iter().find(|ctx|
+                ctx.timestamp == event.timestamp && ctx.kind == event.kind
+                    && ctx.subject == event.subject
+            ).map(|ctx| ctx.journal_messages.iter().cloned().map(js).collect())
+                .unwrap_or_default())),
         ])).collect())),
         ("collector_timings", arr(s.collector_timings.iter().map(|timing| object(vec![
             ("name", js(timing.name)),
@@ -508,7 +523,11 @@ pub fn json(report: &Report) -> String {
             ("succeeded", JsonValue::Bool(timing.succeeded)),
         ])).collect())),
         ("collection_notes", arr(s.notes.iter().cloned().map(js).collect())),
-        ("privacy", js("No raw journal lines; includes bounded source, unit, and interface identifiers and local mountpoints")),
+        ("privacy", js(if s.event_contexts.iter().any(|ctx| !ctx.journal_messages.is_empty()) {
+            "Original classified journal messages included by explicit opt-in; they may contain secrets; review before sharing"
+        } else {
+            "No original journal messages; includes bounded source, unit, and interface identifiers and local mountpoints"
+        })),
         ("disclaimer", js("Observations and hypotheses, not verified root causes")),
     ]);
     let mut out = String::new();
@@ -701,12 +720,20 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
             let hint = report.snapshot.event_contexts.iter().find(|ctx|
                 ctx.timestamp == event.timestamp && ctx.kind == event.kind &&
                 ctx.subject == event.subject);
-            write!(out, "<div class=\"event\"><time>{}</time>{}{}{}{}</div>",
+            write!(out, "<div class=\"event\"><time>{}</time>{}{}{}{}",
                 utc_timestamp(event.timestamp), html_escape(event.kind.label()),
                 event.subject.as_deref().map(|s| format!(" [{}]", html_escape(s))).unwrap_or_default(),
                 event.source.as_deref().map(|s| format!(" via {}", html_escape(s))).unwrap_or_default(),
-                hint.map(|ctx| format!(" — <code>{}</code>", html_escape(&ctx.signal)))
+                hint.filter(|ctx| !ctx.signal.is_empty())
+                    .map(|ctx| format!(" — <code>{}</code>", html_escape(&ctx.signal)))
                     .unwrap_or_default()).unwrap();
+            if let Some(ctx) = hint {
+                for message in &ctx.journal_messages {
+                    write!(out, "<p><small>Original journal message (sensitive): </small><code>{}</code></p>",
+                        html_escape(message)).unwrap();
+                }
+            }
+            out.push_str("</div>");
         }
         out.push_str("</div>");
     }
@@ -740,7 +767,11 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         for note in &report.snapshot.notes { write!(out, "<li>{}</li>", html_escape(note)).unwrap(); }
         out.push_str("</ul>");
     }
-    out.push_str("<footer>No raw journal messages are included. Reports may contain unit names and local mountpoints. Findings are not verified root causes. No external resources, scripts, or telemetry.</footer></main></body></html>\n");
+    if report.snapshot.event_contexts.iter().any(|ctx| !ctx.journal_messages.is_empty()) {
+        out.push_str("<footer>Original classified journal messages were requested and may contain passwords or other sensitive data. Review before sharing. Findings are not verified root causes.</footer></main></body></html>\n");
+    } else {
+        out.push_str("<footer>No original journal messages are included. Reports may contain unit names and local mountpoints. Findings are not verified root causes. No external resources, scripts, or telemetry.</footer></main></body></html>\n");
+    }
     out
 }
 
