@@ -79,6 +79,51 @@ not expose live theme-change notifications. You can always choose Light
 or Dark manually. GUI appearance does not affect CLI/TUI output, diagnostic
 rules, the read-only collector, clipboard behavior or JSON exports.
 
+## Incident overview and double-click investigation (v0.11.0)
+
+After **Run diagnostics**, the first results page is now an **Incident overview**.
+Warnings appear before informational observations. Each row shows the finding's
+severity, useful title, affected interface/systemd unit when identifiable,
+first matching UTC timestamp, and number of relevant events still available
+in the retained timeline. Selecting a row displays a short evidence preview.
+
+**Double-click an alert** to open the second page, **Incident details**.
+Use **Back to overview** to return; no diagnostic rerun is needed.
+
+The details page shows:
+
+- Diagnostic rule ID, severity, confidence and historical/current scope.
+- Every *retained* relevant classified event, in UTC, with the emitting
+  program, affected interface/unit, and its safely extracted codes (when
+  available). Examples: Wi-Fi deauthentication reason, DHCP timeout,
+  `status=1/FAILURE` or systemd unit result.
+- The associated finding's actual evidence, time-window context, and
+  current local network or systemd snapshot (which may differ from the
+  state when the earlier error occurred).
+- Suggested **read-only** checks and explicit limitations. It does not
+  diagnose a confirmed root cause unless directly established by evidence.
+
+The **Event timeline** also supports double-click to inspect a single event.
+All detail text remains mouse-selectable and copyable via Ctrl+C; nothing
+is sent to an external service. This is designed to work on CachyOS,
+Manjaro, Debian and other Linux distributions with PyQt6.
+
+### Journal privacy and interpretation
+
+WhyDown does **not** store or export raw journal messages, Wi-Fi BSSIDs,
+hostnames from log messages, credentials or command arguments. The Rust
+collector extracts only short, whitelisted reason/status codes plus existing
+bounded unit/interface/source identifiers. If a reason cannot be safely
+extracted, WhyDown displays **not available** rather than inventing it.
+The report's JSON schema remains v2 with an additive, nullable
+`timeline[].diagnostic_hint` field.
+
+For bounded output, the JSON timeline retains up to the latest **300
+classified events**, while a detailed incident page displays at most its
+latest 80 matching events. Event counts and hours on the overview therefore
+refer to retained timeline observations, not a complete system history.
+Journal truncation and unverified collectors are shown explicitly.
+
 ## Design and use
 
 The app features a dark sidebar, visual warning/observation/event summary
