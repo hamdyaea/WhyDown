@@ -40,12 +40,25 @@ sh scripts/install.sh --desktop
 The installer checks optional graphical dependencies and tells you what is
 missing. It does **not** install system packages automatically.
 
-### Native packages
+### Install `.deb` on Kali, Debian and Ubuntu
 
-Kali, Debian and Ubuntu share amd64/arm64 `.deb` packages on
-[GitHub Releases](https://github.com/hamdyaea/WhyDown/releases).
-Arch, Manjaro and CachyOS share the [AUR recipes](packaging/aur/).
-See [native packaging details](docs/PACKAGING.md).
+Official **v0.12.3** packages (check `dpkg --print-architecture`):
+- **Intel/AMD 64-bit:** [amd64 .deb](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb) · [SHA-256](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb.sha256)
+- **ARM 64-bit:** [arm64 .deb](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_arm64.deb) · [SHA-256](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_arm64.deb.sha256)
+
+```bash
+sudo apt update
+sudo apt install -y curl ca-certificates python3 python3-pyqt6  # GUI dependencies
+curl -fLO https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb  # replace amd64 with arm64 as needed
+curl -fLO https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb.sha256
+sha256sum -c whydown_0.12.3-1_amd64.deb.sha256
+sudo apt install -y ./whydown_0.12.3-1_amd64.deb
+whydown --version
+whydown gui
+```
+
+APT resolves dependencies; CLI/TUI need no Qt, while the GUI uses `python3` and `python3-pyqt6`.
+See the [package guide](docs/PACKAGING.md); Manjaro/CachyOS/Arch use [AUR recipes](packaging/aur/README.md).
 
 ### GUI prerequisites (Qt 6)
 
@@ -71,19 +84,11 @@ Verify before starting: `sh scripts/install.sh --check-gui-prereqs`.
 
 If `~/.local/bin` is in your `PATH`, use `whydown` instead of the full path.
 
-The GUI starts in **Dark** mode on first launch. Change **Appearance** to
-*Dark*, *Light* or *System* at any time. Your explicit choice is remembered.
+The GUI defaults to **Dark**; use **Appearance** for saved Light/System themes.
 
-**Investigate an alert:** after a diagnosis, the first page lists the exact
-affected interfaces or systemd units when identifiable, times and event counts.
-**Double-click an incident** to open a detailed page with matched journal
-indicators (e.g. Wi-Fi reason or service exit status), current state and
-read-only verification commands. With original journal messages enabled, WhyDown
-also shows relevant application fatal/error text from a bounded, unit-scoped
-journal when available. It distinguishes `exec_main_status` from the
-`ExecStart` command status (which may be a control process), and strips
-trailing sentence punctuation when identifying a systemd unit. Nothing is
-repaired or uploaded; original messages can contain secrets.
+**Investigate an alert:** double-click for original application errors and
+scoped systemd `ExecMainStatus`/`ExecStart` codes. Diagnostics are read-only;
+original journal messages may contain secrets.
 
 ## Useful commands
 
