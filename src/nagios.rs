@@ -614,6 +614,10 @@ mod tests {
         assert_eq!(opts.metric, "memory");
         assert_eq!(opts.timeout, Duration::from_secs(9));
         assert!(opts.critical.unwrap().triggered(99.0));
+        let alias = parse_options(&[
+            "check", "--metric", "service_active", "--unit", "sshd.service"
+        ].map(str::to_owned)).unwrap();
+        assert_eq!(alias.metric, "service");
         for bad in [
             vec!["--metric","all","--warning","80"],
             vec!["--metric","unknown"],
