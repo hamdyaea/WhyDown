@@ -146,7 +146,8 @@ fn filter_points(points: &[Point], hours: u64) -> Vec<Point> {
 /// spikes are not erased when drawing long histories.
 fn bounded_points(points: &[Point]) -> Vec<Point> {
     if points.len() <= MAX_SERIES_POINTS { return points.to_vec(); }
-    let bucket = points.len().div_ceil(MAX_SERIES_POINTS / 4);
+    let divisor = MAX_SERIES_POINTS / 4;
+    let bucket = (points.len() + divisor - 1) / divisor;
     let mut reduced = Vec::new();
     for chunk in points.chunks(bucket) {
         let min = chunk.iter().min_by(|a,b| a.value.total_cmp(&b.value)).unwrap();
