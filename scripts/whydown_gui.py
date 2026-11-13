@@ -463,7 +463,7 @@ def detailed_incident(report, finding):
                 f"active={state.get('active_state', '?')}, "
                 f"sub={state.get('sub_state', '?')}, "
                 f"result={state.get('result', '?')}, "
-                f"exit_status={state.get('exec_main_status')}, "
+                f"exec_main_status={state.get('exec_main_status')} (main process only), "
                 f"transient={state.get('transient')}, "
                 f"desktop_launcher={state.get('desktop_entry')}, "
                 f"restarts={state.get('n_restarts', 'unknown')}")
@@ -526,7 +526,7 @@ def coverage_details(r):
     for v in (sysinfo.get("service_statuses") or [])[:20]:
         lines.append(f" • {v.get('unit', '?')} [{v.get('manager', 'unknown')}]: "
                      f"{v.get('active_state', '?')}/{v.get('sub_state', '?')}; "
-                     f"result={v.get('result', '?')}; exit_status={v.get('exec_main_status')}")
+                     f"result={v.get('result', '?')}; exec_main_status={v.get('exec_main_status')} (control process may differ)")
     lines.extend(["", "COLLECTOR LIMITATIONS"])
     notes = r.get("collection_notes") or []
     lines.extend(" • " + str(e) for e in notes[:80])
