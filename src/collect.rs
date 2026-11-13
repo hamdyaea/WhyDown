@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, NetworkDropDelta, ServiceStatus, Snapshot};
+use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventContext, EventKind, Focus, InterfaceStats, NetworkDropDelta, ServiceStatus, Snapshot};
 use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
@@ -243,7 +243,7 @@ pub fn collect_with_options(
             if examined == 0 {
                 snapshot.notes.push("No journal entries were returned; logging may be unavailable, inaccessible or simply quiet".into());
             }
-            snapshot.events = parse_journal(&sample);
+            (snapshot.events, snapshot.event_contexts) = parse_journal_with_context(&sample);
         }
         Ok((false, _)) => snapshot.notes.push(
             "Journal collection failed or access is restricted; verify journalctl permissions and available boots".into(),
@@ -766,11 +766,94 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
     None
 }
 
+/// Extract only explicit diagnostic codes or canonical status transitions.
+///
+/// Never retain arbitrary message text: journal records may contain Wi-Fi
+/// BSSIDs, hostnames, URLs, client names, credentials and command arguments.
+/// Accepted indicators contain only short ASCII state/reason/status codes.
+fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
+    fn token(s: &str) -> Option<String> {
+        let candidate = s.trim_start_matches(|c: char| c == '\'' || c == '"' || c == '(')
+            .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/' | '=' | '.')))
+            .next()?.trim_end_matches(|c: char| c == '.' || c == '/');
+        if candidate.is_empty() || candidate.len() > 48 ||
+            !candidate.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-./=".contains(&c)) ||
+            candidate.contains("..") {
+            return None;
+        }
+        Some(candidate.to_string())
+    }
+    let lower = body.to_ascii_lowercase();
+    let mut parts: Vec<String> = Vec::new();
+    for (marker, label) in [
+        ("status=", "exit_status"),
+        ("reason=", "reason"),
+        ("reason: ", "reason"),
+        ("failed with result ", "systemd_result"),
+        ("result=", "result"),
+        ("errno=", "errno"),
+    ] {
+        if let Some(pos) = lower.find(marker) {
+            let suffix = &body[pos + marker.len()..];
+            if let Some(value) = token(suffix) {
+                // Never keep arbitrary strings from a journal line, even if
+                // alphanumeric, unless the value has a strict status shape.
+                let accepted = match label {
+                    "exit_status" => value.bytes().next().is_some_and(|c| c.is_ascii_digit()),
+                    "reason" => value.bytes().next().is_some_and(|c| c.is_ascii_digit())
+                        || (matches!(kind, EventKind::LinkDown | EventKind::DhcpProblem
+                            | EventKind::WifiRoamStart)
+                            && matches!(value.to_ascii_lowercase().as_str(),
+                                "carrier-changed" | "ssid-not-found" | "supplicant-disconnect"
+                                | "no-secrets" | "dhcp-failed" | "ip-config-unavailable"
+                                | "supplicant-timeout" | "connection-removed"
+                                | "user-requested" | "deauth" | "disassoc")),
+                    "systemd_result" | "result" => matches!(kind, EventKind::ServiceFailure
+                            | EventKind::ServiceRestartScheduled)
+                        && matches!(value.to_ascii_lowercase().as_str(),
+                            "exit-code" | "signal" | "core-dump" | "timeout" | "start-limit-hit"
+                            | "resources" | "protocol" | "watchdog" | "oom-kill" | "success"),
+                    "errno" => value.bytes().all(|c| c.is_ascii_digit()),
+                    _ => false,
+                };
+                if accepted {
+                    parts.push(format!("{label}={value}"));
+                }
+            }
+        }
+    }
+    // Canonical patterns are useful and contain no journal arguments.
+    if matches!(kind, EventKind::LinkDown) &&
+        lower.contains("activated -> disconnected") {
+        parts.push("transition=activated_to_disconnected".into());
+    } else if matches!(kind, EventKind::LinkDown) &&
+        lower.contains("ctrl-event-disconnected") {
+        parts.push("transition=wpa_disconnected".into());
+    }
+    if matches!(kind, EventKind::DhcpProblem) &&
+        (lower.contains("timed out") || lower.contains("timeout")) {
+        parts.push("dhcp_timeout=reported".into());
+    }
+    if matches!(kind, EventKind::DnsProblem) && lower.contains("servfail") {
+        parts.push("dns_reply=SERVFAIL".into());
+    }
+    if matches!(kind, EventKind::ServiceFailure) &&
+        lower.contains("start request repeated too quickly") {
+        parts.push("start_limit=hit".into());
+    }
+    if parts.is_empty() { None } else { Some(parts.into_iter().take(4).collect::<Vec<_>>().join("; ")) }
+}
+
 /// Parse journalctl short-unix output into bounded classified events.
 /// Only source/subject identifiers and UTC seconds survive; raw messages are discarded.
 pub fn parse_journal(content: &str) -> Vec<Event> {
+    parse_journal_with_context(content).0
+}
+
+pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContext>) {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
+    let mut contexts = Vec::new();
     let mut network_transition_until = 0_u64;
     for line in content.lines() {
         let mut parts = line.trim().splitn(2, char::is_whitespace);
@@ -806,6 +889,11 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
         }
         let subject = event_subject(body, kind);
         if seen.insert((unix, kind.as_str(), subject.clone())) {
+            if let Some(signal) = diagnostic_signal(body, kind) {
+                contexts.push(EventContext {
+                    timestamp: unix, kind, subject: subject.clone(), signal,
+                });
+            }
             events.push(Event {
                 timestamp: unix, kind, subject, source,
             });
@@ -814,7 +902,7 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
     events.sort_by(|a,b| a.timestamp.cmp(&b.timestamp)
         .then(a.kind.as_str().cmp(b.kind.as_str()))
         .then(a.subject.cmp(&b.subject)));
-    events
+    (events, contexts)
 }
 
 pub fn classify_log_line(text: &str) -> Option<EventKind> {
