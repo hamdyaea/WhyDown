@@ -352,6 +352,7 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - Check each fast Linux sensor: /proc/meminfo, PSI, file-nr, /proc/loadavg,
   route table, resolv.conf, bounded local `df` and `systemctl --failed`.
   No active DNS/connectivity requests and no full journal scan.
+- The named systemd check requires a strictly validated `--unit`, returns 1/0 `service_active` perfdata, and is excluded from aggregate `all`.
 - Confirm opt-in `--record` creates 0600 history and appends actual timestamped
   readings and configured thresholds; default checks do not create any files.
 - Confirm `nagios graph` SVG and `nagios dashboard` offline HTML: graphs
