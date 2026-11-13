@@ -463,6 +463,71 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             });
         }
     }
+    // Treat a narrowly identified GUI launcher exit separately from other
+    // historical systemd failures. Exit 24 alone is NOT a successful handoff.
+    // An app-* user-session launcher must have an observed exit_status=24,
+    // and both systemd managers must have no failed units *now*.
+    let desktop_handoff = |event: &Event| {
+        if event.kind != EventKind::ServiceFailure { return false; }
+        let Some(unit) = event.subject.as_deref() else { return false };
+        if !unit.starts_with("app-") || !unit.ends_with(".service")
+            || !snapshot.system_units_checked || !snapshot.failed_units.is_empty()
+            || !snapshot.failed_user_units.as_ref().is_some_and(|units| units.is_empty()) {
+            return false;
+        }
+        let exit24 = snapshot.event_contexts.iter().any(|ctx|
+            ctx.kind == event.kind && ctx.timestamp == event.timestamp
+            && ctx.subject.as_deref() == Some(unit)
+            && ctx.signal.split("; ").any(|part|
+                part == "exit_status=24" || part.starts_with("exit_status=24/")));
+        // Do not down-rank a unit that the scoped manager still reports failed.
+        exit24 && !snapshot.service_statuses.iter().any(|status|
+            status.unit == unit && status.active_state == "failed")
+    };
+    let desktop_events: Vec<&Event> = events.iter()
+        .filter(|event| desktop_handoff(event)).collect();
+    if !desktop_events.is_empty() {
+        let mut units: Vec<String> = desktop_events.iter()
+            .filter_map(|e| e.subject.clone()).collect();
+        units.sort();
+        units.dedup();
+        let mut evidence = vec![
+            format!("{} historical desktop-launcher exit {} observed;                      system and user managers have zero currently failed units",
+                desktop_events.len(), count_word(desktop_events.len(), "event", "events")),
+            format!("Desktop app unit(s): {}", units.join(", ")),
+        ];
+        for event in desktop_events.iter().take(8) {
+            if let Some(ctx) = snapshot.event_contexts.iter().find(|ctx|
+                ctx.timestamp == event.timestamp && ctx.kind == event.kind
+                    && ctx.subject == event.subject) {
+                evidence.push(format!("{} at {}: {}",
+                    event.subject.as_deref().unwrap_or("unknown"),
+                    utc_timestamp(event.timestamp), ctx.signal));
+            }
+        }
+        evidence.push("The launcher may have handed the document to an existing GUI             session. The handoff, application readiness and root cause remain unverified.".into());
+        findings.push(Finding {
+            id: "DESKTOP_LAUNCH_EXIT_LOGS",
+            severity: Severity::Info,
+            confidence: Confidence::Moderate,
+            title: if units.len() == 1 {
+                format!("Historical desktop launcher exit: {}", units[0])
+            } else {
+                format!("{} historical desktop launcher exits", desktop_events.len())
+            },
+            explanation: "An app-* desktop-session launcher exited with observed status 24;                 the current system and user failed-unit lists are empty.                 This is a historical observation, not an active systemd failure.                 It does not establish whether the browser/document opened successfully.".into(),
+            evidence,
+            checks: vec![
+                "Verify whether the expected graphical document/window actually opened".into(),
+                "Inspect the user-session journal and current systemctl --user --failed output".into(),
+            ],
+        });
+    }
+    // Unidentified or unrelated journal failures are kept as warnings.
+    let remaining_events: Vec<Event> = events.iter()
+        .filter(|event| !desktop_handoff(event))
+        .cloned().collect();
+    let events = remaining_events.as_slice();
     let failures = count(events, EventKind::ServiceFailure);
     if failures > 0 {
         let distinct_seconds: std::collections::HashSet<u64> = events.iter()
@@ -502,19 +567,38 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                 ];
                 let names = event_subjects(events, EventKind::ServiceFailure);
                 if !names.is_empty() { evidence.push(format!("Identified unit(s): {}", names.join(", "))); }
+                // Report whitelisted exit codes and result markers rather
+                // than collapsing distinct lines into generic service warnings.
+                for ctx in snapshot.event_contexts.iter()
+                    .filter(|ctx| ctx.kind == EventKind::ServiceFailure
+                        && events.iter().any(|e| e.kind == ctx.kind
+                            && e.timestamp == ctx.timestamp && e.subject == ctx.subject))
+                    .take(8) {
+                    evidence.push(format!("Historical {} at {}: {}",
+                        ctx.subject.as_deref().unwrap_or("unattributed failure"),
+                        utc_timestamp(ctx.timestamp), ctx.signal));
+                }
+                for status in snapshot.service_statuses.iter()
+                    .filter(|status| events.iter().any(|event|
+                        event.kind == EventKind::ServiceFailure
+                        && event.subject.as_deref() == Some(status.unit.as_str()))) {
+                    evidence.push(format!(
+                        "{}: current {} manager state load={} active={}/{} result={}                          exit_status={} transient={} desktop_entry={} (not application readiness)",
+                        status.unit, status.manager, status.load_state, status.active_state,
+                        status.sub_state, status.result,
+                        status.exec_main_status.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),
+                        status.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                        status.desktop_entry));
+                }
                 for (unit, when) in &matched_restarts {
-                    evidence.push(format!("{}: restart scheduled at {}; this alone does not confirm recovery",
+                    evidence.push(format!("{}: restart scheduled at {}; not verified recovery",
                         unit, utc_timestamp(*when)));
-                    if let Some(state) = snapshot.service_statuses.iter().find(|s| &s.unit == unit) {
-                        evidence.push(format!(
-                            "{}: current system-manager state is {}/{} (result={}, restarts={}); this is not application readiness",
-                            unit, state.active_state, state.sub_state, state.result,
-                            state.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())
-                        ));
-                    }
                 }
                 if snapshot.system_units_checked && snapshot.failed_units.is_empty() {
-                    evidence.push("Current systemd snapshot has zero failed system units; past failures may have recovered".into());
+                    evidence.push("Current system manager: zero failed units; historical faults may have recovered".into());
+                    if snapshot.failed_user_units.as_ref().is_some_and(|units| units.is_empty()) {
+                        evidence.push("Current user manager: zero failed units; application readiness not verified".into());
+                    }
                 }
                 if let Some(uptime) = snapshot.uptime_seconds {
                     let estimated_boot = generated_at.saturating_sub(uptime);
@@ -532,7 +616,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             },
             checks: vec![
                 "Compare current `systemctl --failed` and `systemctl --user --failed` state".into(),
-                "Check surrounding journal lines: 15/TERM can occur during shutdown; status=1/FAILURE is a real process exit failure".into(),
+                "Inspect exit status, result and manager in the incident timeline; nonzero status alone does not prove an ongoing outage".into(),
                 "Inspect automatic restart policies and later recovery messages".into(),
             ],
         });
