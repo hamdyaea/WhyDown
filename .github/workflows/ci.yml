@@ -23,6 +23,15 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build release
         run: cargo build --release --locked
+      - name: Validate Debian package and AUR recipes
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n packaging/deb/build-deb.sh
+          bash -n packaging/aur/whydown/PKGBUILD
+          bash packaging/deb/build-deb.sh ./target/release/whydown /tmp/whydown-ci-deb
+          dpkg-deb --info /tmp/whydown-ci-deb/*.deb
+          dpkg-deb --contents /tmp/whydown-ci-deb/*.deb | grep -F '/usr/share/applications/whydown.desktop'
       - name: Interactive TUI pseudo-terminal smoke test
         run: python3 tests/tui_pty_smoke.py ./target/release/whydown
       - name: GUI model tests (no display needed)
