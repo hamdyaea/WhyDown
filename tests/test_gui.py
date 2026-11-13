@@ -169,6 +169,36 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("No event of this class", standalone)
         self.assertIn("No specific check supplied", standalone)
 
+    def test_unit_scoped_restart_and_temporal_correlation_do_not_mix_events(self):
+        data = self.fixture()
+        data["timeline"] = [
+            {"timestamp": "2026-11-12T15:00:00Z", "kind": "service_restart_scheduled",
+             "subject": "alpha.service", "source": "systemd"},
+            {"timestamp": "2026-11-12T15:00:01Z", "kind": "service_restart_scheduled",
+             "subject": "beta.service", "source": "systemd"},
+            {"timestamp": "2026-11-12T15:00:02Z", "kind": "link_disconnected",
+             "subject": "wlan0", "source": "kernel"},
+            {"timestamp": "2026-11-12T15:00:03Z", "kind": "dns_failure",
+             "subject": None, "source": "resolved"},
+            {"timestamp": "2026-11-12T16:00:00Z", "kind": "dns_failure",
+             "subject": None, "source": "resolved"},
+        ]
+        restart = {
+            "id": "SERVICE_RESTART_OBSERVED",
+            "evidence": ["beta.service: restart scheduled at 2026-11-12T15:00:01Z"],
+        }
+        self.assertEqual(
+            [e["subject"] for e in gui.related_events(data, restart)],
+            ["beta.service"])
+        pair = {
+            "id": "LINK_BEFORE_DNS",
+            "evidence": ["Link event: 2026-11-12T15:00:02Z",
+                         "DNS event: 2026-11-12T15:00:03Z (1 s later)"],
+        }
+        self.assertEqual(
+            [e["timestamp"] for e in gui.related_events(data, pair)],
+            ["2026-11-12T15:00:02Z", "2026-11-12T15:00:03Z"])
+
     def test_dossier_events_are_bounded_and_not_claimed_complete(self):
         data = self.fixture()
         finding = {"id": "DNS_FAILURES", "severity": "warning", "title": "DNS", "evidence": []}
