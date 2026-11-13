@@ -19,7 +19,7 @@ pub const HELP: &str = r#"WhyDown Nagios/Icinga plugin and offline metric charts
 
 USAGE
   whydown nagios check [--metric NAME] [--warning RANGE] [--critical RANGE]
-                      [--path /mount] [--timeout SECONDS] [--record FILE]
+                      [--path /mount] [--unit NAME] [--timeout SECONDS] [--record FILE]
                       [--verbose] [--demo]
   whydown nagios [--metric NAME] [OPTIONS]    # shorthand for check
   whydown nagios graph --history FILE --metric PERF_LABEL --output FILE.svg
@@ -211,7 +211,11 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
         o.path.chars().any(char::is_control) {
         return Err("--path must be an absolute filesystem path without control characters".into());
     }
-    if o.metric == "service" && o.unit.as_deref().is_none_or(|name| !safe_unit(name)) {
+    let valid_unit = match o.unit.as_deref() {
+        Some(name) => safe_unit(name),
+        None => false,
+    };
+    if o.metric == "service" && !valid_unit {
         return Err("--metric service requires a safe --unit NAME, e.g. sshd.service".into());
     }
     if o.metric != "service" && o.unit.is_some() {
