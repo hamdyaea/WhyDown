@@ -285,6 +285,10 @@ def overview_row(report, finding):
     first = events[0].get("timestamp", "—") if events else (
         "Current state" if finding.get("scope") == "current_snapshot" else "—")
     summary = (finding.get("evidence") or [finding.get("explanation", "")])[0]
+    signal = next((str(e["diagnostic_hint"]) for e in events
+                   if e.get("diagnostic_hint")), None)
+    if signal:
+        summary = str(summary) + "  |  Indicator: " + signal
     return {
         "severity": str(finding.get("severity", "?")).upper(),
         "title": str(finding.get("title", "Finding")),
@@ -368,6 +372,12 @@ def detailed_incident(report, finding):
             signal = event.get("diagnostic_hint")
             if signal:
                 lines.append(f"    Indicator: {signal}")
+                if "PREV_AUTH_NOT_VALID" in signal:
+                    lines.append("    Interpretation: 802.11 reason 2 — previous authentication not valid; underlying cause is not proven.")
+                elif "DISASSOC_DUE_TO_INACTIVITY" in signal:
+                    lines.append("    Interpretation: 802.11 reason 4 — station disconnected due to inactivity; underlying cause is not proven.")
+                elif "exit_status=1/FAILURE" in signal:
+                    lines.append("    Interpretation: nonzero process exit observed; current service state must be checked separately.")
         if len(events) > 80:
             lines.append(f"Only the newest 80 matching timeline entries are displayed here (of {len(events)} retained).")
     else:
