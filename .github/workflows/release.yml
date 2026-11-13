@@ -162,6 +162,7 @@ jobs:
           test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
           test "$(find dist -maxdepth 1 -name '*.deb' | wc -l)" -eq 2
           test "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 6
+          ! grep -Eq '  /' dist/*.sha256
           ( cd dist && sha256sum -c ./*.sha256 )
       - name: Create GitHub Release and vX.Y.Z tag
         env:
