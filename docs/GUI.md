@@ -210,3 +210,31 @@ icon and sidebar, and installed in the user's XDG hicolor icon theme
 when the desktop launcher is explicitly requested.
 The GitHub wordmark is assets/whydown-logo.svg.
 Headless usage can display a matching plain ASCII logo with whydown logo.
+
+## v0.12.1 — systemd user-session and desktop-launcher incident accuracy
+
+When investigating service failures, the **Incident details** page now displays
+the **verified manager** (`system` or `user`) used for the current
+read-only `systemctl show` lookup. It also shows the safe numeric
+`exec_main_status`, the `transient` property and whether systemd's
+`FragmentPath` describes a known `.desktop` launcher. The underlying
+path, executable arguments, and complete journal text are **not stored**.
+
+CachyOS/Opera reproduction: starting `dashboard.html` using `xdg-open`
+produced a user-session transient `app-opera@...service` with
+`code=exited`, `status=24/n/a`, and `result=exit-code`. After
+`systemctl --user reset-failed`, both user and system managers reported
+zero failed units. WhyDown must retain that historical event **without**
+misrepresenting it as a currently failing system service. If an app-*
+launcher has status 24, no currently failed units, and an accessible manager,
+the historical launcher can be shown as **information**, never as a proven
+successful browser handoff. Other historical/unattributed errors remain
+**warnings**. A still-failed unit or a different exit status is not
+automatically downgraded.
+
+In GUI dossiers, actionable commands for verified **user** units now use
+`systemctl --user` and `journalctl --user`. If a transient unit has
+disappeared, WhyDown reports the absence of a current state rather than
+inventing a successful recovery. Classified journal lines from the same
+incident/second now merge distinct whitelisted error indicators, so
+`exit_status=24` and `systemd_result=exit-code` can both be inspected.
