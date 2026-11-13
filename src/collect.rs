@@ -796,27 +796,53 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
         if let Some(pos) = lower.find(marker) {
             let suffix = &body[pos + marker.len()..];
             if let Some(value) = token(suffix) {
-                // Never keep arbitrary strings from a journal line, even if
-                // alphanumeric, unless the value has a strict status shape.
-                let accepted = match label {
-                    "exit_status" => value.bytes().next().is_some_and(|c| c.is_ascii_digit()),
-                    "reason" => value.bytes().next().is_some_and(|c| c.is_ascii_digit())
-                        || (matches!(kind, EventKind::LinkDown | EventKind::DhcpProblem
-                            | EventKind::WifiRoamStart)
-                            && matches!(value.to_ascii_lowercase().as_str(),
-                                "carrier-changed" | "ssid-not-found" | "supplicant-disconnect"
-                                | "no-secrets" | "dhcp-failed" | "ip-config-unavailable"
-                                | "supplicant-timeout" | "connection-removed"
-                                | "user-requested" | "deauth" | "disassoc")),
-                    "systemd_result" | "result" => matches!(kind, EventKind::ServiceFailure
-                            | EventKind::ServiceRestartScheduled)
-                        && matches!(value.to_ascii_lowercase().as_str(),
-                            "exit-code" | "signal" | "core-dump" | "timeout" | "start-limit-hit"
-                            | "resources" | "protocol" | "watchdog" | "oom-kill" | "success"),
-                    "errno" => value.bytes().all(|c| c.is_ascii_digit()),
-                    _ => false,
+                // Whitelist numeric codes and documented status names only.
+                // Arbitrary alphanumeric values can be secrets, hostnames or
+                // SSIDs; never forward them even under a field called "reason".
+                let digits = |v: &str, max: usize| {
+                    !v.is_empty() && v.len() <= max && v.bytes().all(|c| c.is_ascii_digit())
                 };
-                if accepted {
+                let normalized = match label {
+                    "exit_status" if matches!(kind, EventKind::ServiceFailure) => {
+                        let (number, suffix) = value.split_once('/').unwrap_or((&value, ""));
+                        if !digits(number, 5) { None }
+                        else if matches!(suffix.to_ascii_uppercase().as_str(),
+                            "FAILURE" | "SUCCESS" | "TERM" | "KILL" | "ABRT"
+                            | "SEGV" | "BUS" | "ILL" | "TRAP") {
+                            Some(format!("{number}/{suffix}"))
+                        } else { Some(number.to_string()) }
+                    }
+                    "reason" if matches!(kind, EventKind::LinkDown
+                            | EventKind::DhcpProblem | EventKind::WifiRoamStart) => {
+                        let (number, suffix) = value.split_once('=').unwrap_or((&value, ""));
+                        if digits(number, 3) {
+                            if matches!(suffix.to_ascii_uppercase().as_str(),
+                                "PREV_AUTH_NOT_VALID" | "DISASSOC_DUE_TO_INACTIVITY"
+                                | "DEAUTH_LEAVING" | "CLASS2_FRAME_FROM_NONAUTH_STA"
+                                | "CLASS3_FRAME_FROM_NONASSOC_STA" | "DISASSOC_AP_BUSY"
+                                | "MIC_FAILURE" | "4WAY_HANDSHAKE_TIMEOUT"
+                                | "GROUP_KEY_UPDATE_TIMEOUT") {
+                                Some(format!("{number}={suffix}"))
+                            } else { Some(number.to_string()) }
+                        } else if matches!(value.to_ascii_lowercase().as_str(),
+                            "carrier-changed" | "ssid-not-found" | "supplicant-disconnect"
+                            | "no-secrets" | "dhcp-failed" | "ip-config-unavailable"
+                            | "supplicant-timeout" | "connection-removed"
+                            | "user-requested" | "deauth" | "disassoc") {
+                            Some(value)
+                        } else { None }
+                    }
+                    "systemd_result" | "result"
+                        if matches!(kind, EventKind::ServiceFailure |
+                            EventKind::ServiceRestartScheduled) &&
+                            matches!(value.to_ascii_lowercase().as_str(),
+                                "exit-code" | "signal" | "core-dump" | "timeout"
+                                | "start-limit-hit" | "resources" | "protocol"
+                                | "watchdog" | "oom-kill" | "success") => Some(value),
+                    "errno" if digits(&value, 4) => Some(value),
+                    _ => None,
+                };
+                if let Some(value) = normalized {
                     parts.push(format!("{label}={value}"));
                 }
             }
