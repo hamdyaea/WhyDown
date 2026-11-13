@@ -1168,6 +1168,27 @@ mod tests {
     }
 
     #[test]
+    fn original_journal_messages_are_opt_in_bounded_and_correlated() {
+        let logs = concat!(
+            "1794499328.0 machine systemd[1]: app-demo.service: Main process exited, code=exited, status=24 token=LOCAL_SECRET\n",
+            "1794499328.2 machine systemd[1]: app-demo.service: Failed with result 'exit-code'.\n",
+            "1794499328.4 machine systemd[1]: app-demo.service: Failed with result 'exit-code'.\n",
+            "1794499329.0 machine systemd[1]: other.service: Main process exited, code=exited, status=1/FAILURE\n"
+        );
+        let (_, private) = parse_journal_with_context(logs);
+        assert!(private.iter().all(|ctx| ctx.journal_messages.is_empty()));
+        let (events, detailed) = parse_journal_with_context_and_messages(logs, true);
+        assert_eq!(events.len(), 2);
+        let app = detailed.iter().find(|ctx| ctx.subject.as_deref() == Some("app-demo.service")).unwrap();
+        assert_eq!(app.journal_messages.len(), 2);
+        assert!(app.journal_messages[0].contains("token=LOCAL_SECRET"));
+        assert!(app.signal.contains("exit_status=24"));
+        assert!(app.signal.contains("systemd_result=exit-code"));
+        assert!(detailed.iter().any(|ctx| ctx.subject.as_deref() == Some("other.service")
+            && ctx.journal_messages.len() == 1));
+    }
+
+    #[test]
     fn unknown_reason_text_is_not_forwarded_as_diagnostic_code() {
         assert_eq!(diagnostic_signal(
             "wlan0: deauthenticated (Reason: 2=SUPERSENSITIVE_TOKEN)",
