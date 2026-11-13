@@ -37,6 +37,8 @@ pub fn collect_with_options(
 }
 
 /// Opt-in original journal evidence: can contain secrets, including in exports.
+/// Keep legacy collection entrypoints unchanged for existing library callers.
+#[allow(clippy::too_many_arguments)]
 pub fn collect_with_options_and_messages(
     focus: Focus, since_unix: u64, max_events: usize,
     disk_details: bool, current_boot: bool,
