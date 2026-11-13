@@ -21,6 +21,8 @@ pub struct Point {
     pub value: f64,
     pub state: State,
     pub demo: bool,
+    pub warning: Option<f64>,
+    pub critical: Option<f64>,
 }
 #[derive(Debug)]
 struct Config {
@@ -90,7 +92,7 @@ pub fn parse_history(text: &str) -> Result<BTreeMap<&'static str, Vec<Point>>, S
         rows += 1;
         if rows > MAX_HISTORY_ROWS { return Err("metric history exceeds row safety limit".into()); }
         let fields: Vec<_> = line.split('\t').collect();
-        if fields.len() != 5 { continue; }
+        if fields.len() != 5 && fields.len() != 7 { continue; }
         let Some(spec) = spec_for(fields[1]) else { continue; };
         // History labels must be canonical, not ambiguous CLI command names.
         if fields[1] != spec.label { continue; }
@@ -110,7 +112,17 @@ pub fn parse_history(text: &str) -> Result<BTreeMap<&'static str, Vec<Point>>, S
             "live" => false,
             _ => continue,
         };
-        series.entry(spec.label).or_default().push(Point {timestamp, value, state, demo});
+        let bounded_threshold = |value: &str| value.parse::<f64>().ok()
+            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 100_000_000.0);
+        let warning = if fields.len() == 7 {
+            bounded_threshold(fields[5])
+        } else { bounded_threshold(spec.warn) };
+        let critical = if fields.len() == 7 {
+            bounded_threshold(fields[6])
+        } else { bounded_threshold(spec.crit) };
+        series.entry(spec.label).or_default().push(Point {
+            timestamp, value, state, demo, warning, critical
+        });
     }
     for points in series.values_mut() {
         points.sort_by_key(|p| p.timestamp);
@@ -205,15 +217,19 @@ fn chart_svg(spec: Spec, source: &[Point]) -> String {
             pos+4.0, v, escaped(spec.uom));
     }
     // Thin threshold guides are useful in standalone and Nagios graphs.
-    for (threshold, color) in [(spec.warn, "#f6ad55"), (spec.crit, "#f87171")] {
-        if let Ok(v) = threshold.parse::<f64>() {
+    let latest = points.last();
+    for (threshold, color) in [
+        (latest.and_then(|p| p.warning), "#f6ad55"),
+        (latest.and_then(|p| p.critical), "#f87171"),
+    ] {
+        if let Some(v) = threshold {
             if v >= 0.0 && v <= max_y {
                 let pos = y(v);
                 let _ = write!(svg, r##"<path d="M{left:.1} {pos:.1} H{right:.1}" stroke="{color}" stroke-dasharray="7 5" stroke-width="1.5"/>"##);
             }
         }
     }
-    if points.len() > 1 {
+    if points.len() > 1 && span_t > 1 {
         let poly = points.iter().map(|p| format!("{:.2},{:.2}", x(p.timestamp), y(p.value)))
             .collect::<Vec<_>>().join(" ");
         let _ = write!(svg, r##"<polyline points="{poly}" fill="none" stroke="#37dfd0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>"##);
@@ -228,8 +244,11 @@ fn chart_svg(spec: Spec, source: &[Point]) -> String {
     let _ = write!(svg, r##"<text x="{right:.0}" y="250" text-anchor="end" font-size="12" fill="#b0c6d8">{}</text>"##, escaped(&label_end));
     let _ = write!(svg, r##"<text x="66" y="277" font-size="12" fill="#79e5dd">{} measurements; latest {:.2}{}</text>"##,
         source.len(), source.last().map_or(0.0, |p| p.value), escaped(spec.uom));
-    if points.len() == 1 {
-        svg.push_str(r##"<text x="860" y="277" text-anchor="end" font-size="12" fill="#ffca85">Single sample — no trend yet</text>"##);
+    if span_t == 1 {
+        svg.push_str(r##"<text x="860" y="277" text-anchor="end" font-size="12" fill="#ffca85">One timestamp — no trend yet</text>"##);
+    }
+    if points.iter().any(|p| p.demo) {
+        svg.push_str(r##"<text x="860" y="18" text-anchor="end" font-size="13" fill="#ffca85">DEMO DATA PRESENT</text>"##);
     }
     svg.push_str("</svg>");
     svg
@@ -343,7 +362,7 @@ mod tests {
     fn no_history_no_fake_graphs_and_escape_safely() {
         assert!(parse_history("malicious\tpath\tfoobar\n").is_err());
         assert!(!chart_svg(spec_for("memory").unwrap(),
-            &[Point {timestamp:1794500000, value:48.0, state:State::Ok, demo:true}])
+            &[Point {timestamp:1794500000, value:48.0, state:State::Ok, demo:true, warning:Some(80.0), critical:Some(95.0)}])
             .contains("<polyline"));
         assert!(escaped("<script>&\"").contains("&lt;script&gt;&amp;&quot;"));
         let mut samples = parse_history(
