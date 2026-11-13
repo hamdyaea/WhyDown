@@ -574,19 +574,23 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                         && events.iter().any(|e| e.kind == ctx.kind
                             && e.timestamp == ctx.timestamp && e.subject == ctx.subject))
                     .take(8) {
+                    let detail = if ctx.signal.is_empty() {
+                        "no validated diagnostic code; inspect the raw event timeline"
+                    } else { ctx.signal.as_str() };
                     evidence.push(format!("Historical {} at {}: {}",
                         ctx.subject.as_deref().unwrap_or("unattributed failure"),
-                        utc_timestamp(ctx.timestamp), ctx.signal));
+                        utc_timestamp(ctx.timestamp), detail));
                 }
                 for status in snapshot.service_statuses.iter()
                     .filter(|status| events.iter().any(|event|
                         event.kind == EventKind::ServiceFailure
                         && event.subject.as_deref() == Some(status.unit.as_str()))) {
                     evidence.push(format!(
-                        "{}: current {} manager state load={} active={}/{} result={}                          exec_main_status={} transient={} desktop_entry={} (main process only; control process may differ)",
+                        "{}: current {} manager state load={} active={}/{} result={}                          exec_main_status={} exec_start_status={} transient={} desktop_entry={} (ExecStart may be a control command)",
                         status.unit, status.manager, status.load_state, status.active_state,
                         status.sub_state, status.result,
                         status.exec_main_status.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),
+                        status.exec_start_status.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),
                         status.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
                         status.desktop_entry));
                 }
@@ -909,7 +913,7 @@ mod tests {
                 manager: "system".into(),
                 transient: None,
                 desktop_entry: false,
-                exec_main_status: None,
+                exec_main_status: None, exec_start_status: None,
                 load_state: "loaded".into(),
                 active_state: "active".into(),
                 sub_state: "running".into(),
