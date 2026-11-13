@@ -323,6 +323,43 @@ pub fn collect_with_options_and_messages(
                 }
             }
             if let Some(status) = found {
+                // The general journal classifier retains only failure lines.
+                // An opt-in, scoped unit journal can provide the application's
+                // own fatal/error message immediately preceding that failure.
+                // Never query unrelated units or retain extra text by default.
+                if include_journal_messages {
+                    let mut args = vec!["--no-pager", "--output=short-unix"];
+                    if current_boot { args.push("--boot=0"); }
+                    args.push(since_arg.as_str());
+                    args.push("--lines=80");
+                    if status.manager == "user" {
+                        args.push("--user");
+                        args.push("--user-unit");
+                    } else {
+                        args.push("-u");
+                    }
+                    args.push(name.as_str());
+                    progress.detail("journalctl for identified failed unit (max 3s)");
+                    let start = Instant::now();
+                    let result = run_capture_with_limits(
+                        "journalctl", &args, Duration::from_secs(3), 64 * 1024);
+                    let success = matches!(result, Ok((true, _)));
+                    if let Ok((true, content)) = result {
+                        append_targeted_unit_journal_messages(
+                            &mut snapshot.event_contexts, &name, &content,
+                        );
+                    }
+                    snapshot.collector_timings.push(CollectorTiming {
+                        name: "systemd targeted unit journal",
+                        elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                        succeeded: success,
+                    });
+                    if !success {
+                        snapshot.notes.push(format!(
+                            "Extra journal context unavailable for {name}; original classified events remain intact"
+                        ));
+                    }
+                }
                 snapshot.service_statuses.push(status);
             } else {
                 snapshot.notes.push(format!(
@@ -959,6 +996,66 @@ fn journal_message_body(body: &str) -> Option<String> {
     if excerpt.is_empty() { None } else { Some(std::mem::take(&mut excerpt)) }
 }
 
+/// Add high-signal application messages from an explicitly scoped `journalctl -u`
+/// result. A unit association must come from journald's unit filter, *never*
+/// from mere temporal proximity in the global journal. These are context,
+/// not verified causes. Raw text is retained only in the existing opt-in
+/// journal-message path and is constrained by that path's per-event limits.
+fn append_targeted_unit_journal_messages(
+    contexts: &mut [EventContext], unit: &str, content: &str,
+) {
+    let mut relevant = Vec::new();
+    for line in content.lines() {
+        let mut parts = line.trim().splitn(2, char::is_whitespace);
+        let Some(timestamp) = parts.next()
+            .and_then(|v| v.split('.').next())
+            .and_then(|v| v.parse::<u64>().ok()) else { continue; };
+        let body = parts.next().unwrap_or("");
+        // These extra excerpts should explain what the *application* reported,
+        // not repeat the same systemd exit-code/failed-state messages.
+        if matches!(event_source(body).as_deref(), None |
+            Some("systemd" | "sudo" | "doas" | "pkexec")) {
+            continue;
+        }
+        let Some(message) = journal_message_body(body) else { continue; };
+        let lower = message.to_ascii_lowercase();
+        if !["fatal", "error", "[err]", "failed", "failure", "unable",
+              "denied", "permission", "exiting", "panic", "segfault",
+              "crash", "exception", "abort"]
+            .iter().any(|needle| lower.contains(needle)) {
+            continue;
+        }
+        relevant.push((timestamp, message));
+    }
+    for ctx in contexts.iter_mut().filter(|ctx|
+        ctx.kind == EventKind::ServiceFailure &&
+        ctx.subject.as_deref() == Some(unit)) {
+        let mut candidates: Vec<_> = relevant.iter().filter(|(timestamp, _)|
+            (*timestamp <= ctx.timestamp &&
+             ctx.timestamp.saturating_sub(*timestamp) <= 60) ||
+            (*timestamp > ctx.timestamp &&
+             timestamp.saturating_sub(ctx.timestamp) <= 10)
+        ).collect();
+        // Nearest context first; the application error must not be displaced
+        // by less useful 'Failed with result' messages already collected.
+        candidates.sort_by_key(|(timestamp, _)| ctx.timestamp.abs_diff(*timestamp));
+        let mut messages = Vec::new();
+        for (_, message) in candidates {
+            if !messages.contains(message) {
+                messages.push(message.clone());
+            }
+            if messages.len() == 3 { break; }
+        }
+        for message in &ctx.journal_messages {
+            if messages.len() == 3 { break; }
+            if !messages.contains(message) {
+                messages.push(message.clone());
+            }
+        }
+        ctx.journal_messages = messages;
+    }
+}
+
 pub fn parse_journal_with_context_and_messages(
     content: &str, include_journal_messages: bool,
 ) -> (Vec<Event>, Vec<EventContext>) {
@@ -1167,6 +1264,36 @@ mod tests {
             && !d.signal.contains("private") && !d.signal.contains("secret")
             && !d.signal.contains("aa:bb") && !d.signal.contains("account.internal")));
         assert_eq!(parse_journal(logs).len(), events.len());
+    }
+
+    #[test]
+    fn targeted_unit_journal_retains_application_fatal_message_not_unrelated_lines() {
+        let general = concat!(
+            "1794499328.0 kali systemd[1]: nessusd.service: Main process exited, code=exited, status=1/FAILURE\\n",
+            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\\n",
+            "1794499328.2 kali systemd[1]: vboxadd-service.service: Failed with result 'exit-code'.\\n"
+        );
+        let (_, mut contexts) = parse_journal_with_context_and_messages(general, true);
+        let unit_journal = concat!(
+            "1794499300.0 kali nessus-service[764]: nessus-service [764][INFO] : Nessus started\\n",
+            "1794499328.0 kali nessus-service[764]: nessus-service [764][ERR] : Exiting: nessusd had too many fatal errors.\\n",
+            "1794499328.1 kali systemd[1]: nessusd.service: Failed with result 'exit-code'.\\n",
+            "1794499100.0 kali nessus-service[764]: too old fatal error\\n",
+            "1794499350.0 kali nessus-service[764]: future fatal error\\n"
+        );
+        append_targeted_unit_journal_messages(&mut contexts, "nessusd.service", unit_journal);
+        let nessus = contexts.iter().find(|ctx|
+            ctx.subject.as_deref() == Some("nessusd.service")).unwrap();
+        assert!(nessus.journal_messages[0].contains("too many fatal errors."));
+        assert!(nessus.journal_messages.iter().any(|s| s.contains("Main process exited")));
+        assert!(!nessus.journal_messages.iter().any(|s| s.contains("too old")));
+        assert!(!nessus.journal_messages.iter().any(|s| s.contains("future fatal")));
+        assert_eq!(nessus.journal_messages.len(), 3);
+        let other = contexts.iter().find(|ctx|
+            ctx.subject.as_deref() == Some("vboxadd-service.service")).unwrap();
+        assert_eq!(other.journal_messages.len(), 1);
+        let (_, default_contexts) = parse_journal_with_context(general);
+        assert!(default_contexts.iter().all(|ctx| ctx.journal_messages.is_empty()));
     }
 
     #[test]
