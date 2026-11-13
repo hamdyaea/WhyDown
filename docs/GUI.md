@@ -100,7 +100,7 @@ The details page shows:
 - The associated finding's actual evidence, time-window context, and
   current local network or systemd snapshot (which may differ from the
   state when the earlier error occurred).
-- Suggested **read-only** checks and explicit limitations. It does not
+- Copyable **targeted read-only shell commands** for the identified service or interface (identifiers are validated; commands are never executed automatically), plus explicit limitations. It does not
   diagnose a confirmed root cause unless directly established by evidence.
 
 The **Event timeline** also supports double-click to inspect a single event.
