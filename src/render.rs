@@ -698,10 +698,15 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
     if !report.timeline.is_empty() {
         out.push_str("<h2>Classified event timeline</h2><div class=\"timeline\">");
         for event in &report.timeline {
-            write!(out, "<div class=\"event\"><time>{}</time>{}{}{}</div>",
+            let hint = report.snapshot.event_contexts.iter().find(|ctx|
+                ctx.timestamp == event.timestamp && ctx.kind == event.kind &&
+                ctx.subject == event.subject);
+            write!(out, "<div class=\"event\"><time>{}</time>{}{}{}{}</div>",
                 utc_timestamp(event.timestamp), html_escape(event.kind.label()),
                 event.subject.as_deref().map(|s| format!(" [{}]", html_escape(s))).unwrap_or_default(),
-                event.source.as_deref().map(|s| format!(" via {}", html_escape(s))).unwrap_or_default()).unwrap();
+                event.source.as_deref().map(|s| format!(" via {}", html_escape(s))).unwrap_or_default(),
+                hint.map(|ctx| format!(" — <code>{}</code>", html_escape(&ctx.signal)))
+                    .unwrap_or_default()).unwrap();
         }
         out.push_str("</div>");
     }
