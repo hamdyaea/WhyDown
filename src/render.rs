@@ -735,6 +735,10 @@ mod tests {
         snapshot.failed_units.clear();
         snapshot.service_statuses = vec![crate::model::ServiceStatus {
             unit: "example-backup.service".into(),
+            manager: "system".into(),
+            transient: None,
+            desktop_entry: false,
+            exec_main_status: None,
             load_state: "loaded".into(),
             active_state: "active".into(),
             sub_state: "running".into(),
