@@ -773,9 +773,9 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
 /// Accepted indicators contain only short ASCII state/reason/status codes.
 fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
     fn token(s: &str) -> Option<String> {
-        let candidate = s.trim_start_matches(|c: char| c == '\'' || c == '"' || c == '(')
+        let candidate = s.trim_start_matches(['\'', '"', '('])
             .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/' | '=' | '.')))
-            .next()?.trim_end_matches(|c: char| c == '.' || c == '/');
+            .next()?.trim_end_matches(['.', '/']);
         if candidate.is_empty() || candidate.len() > 48 ||
             !candidate.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-./=".contains(&c)) ||
             candidate.contains("..") {
