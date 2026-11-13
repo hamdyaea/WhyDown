@@ -37,6 +37,7 @@ Test the plugin and return status:
 echo "Nagios status: $?"
 ~/.local/bin/whydown nagios check --metric disk --path / --warning 85 --critical 95
 ~/.local/bin/whydown nagios check --metric failed-units
+~/.local/bin/whydown nagios check --metric service --unit sshd.service
 ~/.local/bin/whydown nagios check --metric all --timeout 8
 ```
 
@@ -78,13 +79,15 @@ Use `--verbose` only when longer multi-line plugin output is acceptable.
 | route | default_route | 1 if either IPv4/IPv6 default route exists, else 0 | Warn if absent |
 | dns | dns_servers | Count of valid `nameserver` entries in resolv.conf | Warn if zero |
 | failed-units | failed_units | Currently failed systemd units | Warn at 1–2; critical ≥3 |
+| service | service_active | Named systemd unit (requires `--unit NAME`) | Critical when not active/loaded |
 
 Thresholds are conservative defaults and should be adjusted to the host's
 purpose. CPU PSI is **not** CPU utilization. Load normalized to core count can
 exceed 100%. DNS configuration and default route are **not connectivity
 probes**. `failed-units` is a live systemd status, not a historical event count.
 
-`--metric all` checks all listed metrics. Custom ranges require a single
+`--metric all` checks the twelve host-wide metrics; the named `service`
+check requires `--unit` and is deliberately excluded. Custom ranges require a single
 metric. `--path /srv` applies only to the disk/inode checks (or to both in
 `all` mode); GNU `df` is invoked without the shell, with a short timeout and
 local-filesystem filtering. Avoid setting the path to remote mounts.
@@ -173,6 +176,11 @@ define command {
     command_line    /usr/local/bin/whydown nagios check --metric failed-units
 }
 ```
+
+To monitor a named systemd unit, use `--metric service --unit sshd.service`.
+The plugin reports its `ActiveState` and `LoadState` as a 1/0 metric without
+claiming application health. For local SVG history, use a **separate recorded
+history file per unit** so different services cannot be mixed into one series.
 
 Then attach a service to your monitored host:
 
