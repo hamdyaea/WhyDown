@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
           bash -n packaging/deb/build-deb.sh
           bash -n packaging/aur/whydown/PKGBUILD
+          bash -n packaging/aur/whydown-bin/PKGBUILD
           bash packaging/deb/build-deb.sh ./target/release/whydown /tmp/whydown-ci-deb
           ( cd /tmp/whydown-ci-deb && sha256sum -c ./*.sha256 )
           ! grep -Eq '  /' /tmp/whydown-ci-deb/*.sha256
