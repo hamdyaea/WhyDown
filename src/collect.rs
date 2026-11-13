@@ -30,6 +30,19 @@ pub fn collect_with_options(
     disk_details: bool, current_boot: bool,
     include_remote_mounts: bool, progress: &Progress,
 ) -> Snapshot {
+    collect_with_options_and_messages(
+        focus, since_unix, max_events, disk_details, current_boot,
+        include_remote_mounts, false, progress,
+    )
+}
+
+/// Opt-in original journal evidence: can contain secrets, including in exports.
+pub fn collect_with_options_and_messages(
+    focus: Focus, since_unix: u64, max_events: usize,
+    disk_details: bool, current_boot: bool,
+    include_remote_mounts: bool, include_journal_messages: bool,
+    progress: &Progress,
+) -> Snapshot {
     let mut snapshot = Snapshot {
         os: read_os_name().unwrap_or_else(|| "Unknown Linux".into()),
         kernel: read_trimmed("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Unknown".into()),
@@ -243,7 +256,8 @@ pub fn collect_with_options(
             if examined == 0 {
                 snapshot.notes.push("No journal entries were returned; logging may be unavailable, inaccessible or simply quiet".into());
             }
-            (snapshot.events, snapshot.event_contexts) = parse_journal_with_context(&sample);
+            (snapshot.events, snapshot.event_contexts) =
+                parse_journal_with_context_and_messages(&sample, include_journal_messages);
         }
         Ok((false, _)) => snapshot.notes.push(
             "Journal collection failed or access is restricted; verify journalctl permissions and available boots".into(),
@@ -921,12 +935,31 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
 }
 
 /// Parse journalctl short-unix output into bounded classified events.
-/// Only source/subject identifiers and UTC seconds survive; raw messages are discarded.
+/// The default path never retains original journal messages.
 pub fn parse_journal(content: &str) -> Vec<Event> {
     parse_journal_with_context(content).0
 }
 
 pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContext>) {
+    parse_journal_with_context_and_messages(content, false)
+}
+
+/// Remove the journald hostname, emitter and PID, retaining message only.
+fn journal_message_body(body: &str) -> Option<String> {
+    let (_, message) = body.split_once(": ")?;
+    let message = message.trim();
+    if message.is_empty() { return None; }
+    // Prevent active terminal escapes and bound each potentially sensitive line.
+    let mut excerpt: String = message.chars()
+        .filter(|c| !c.is_control())
+        .take(240).collect();
+    if message.chars().count() > 240 { excerpt.push('…'); }
+    if excerpt.is_empty() { None } else { Some(std::mem::take(&mut excerpt)) }
+}
+
+pub fn parse_journal_with_context_and_messages(
+    content: &str, include_journal_messages: bool,
+) -> (Vec<Event>, Vec<EventContext>) {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
     let mut contexts = Vec::new();
@@ -964,25 +997,36 @@ pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContex
             continue;
         }
         let subject = event_subject(body, kind);
-        // Merge *whitelisted diagnostic indicators* across different journal
-        // lines describing the same incident in the same second. The
-        // classified event itself remains deduplicated. In particular,
-        // "Main process exited ... status=24" and "Failed with result
-        // 'exit-code'" are complementary evidence, not separate incidents.
-        // Raw journal text, URLs and command arguments are never copied.
+        // Preserve indicators and at most three original messages per incident
+        // and second. Default reports never include the original text.
         let signal = diagnostic_signal(body, kind);
-        if let Some(signal) = signal {
+        let message = if include_journal_messages {
+            journal_message_body(body)
+        } else { None };
+        if signal.is_some() || message.is_some() {
             if let Some(context) = contexts.iter_mut().find(|ctx: &&mut EventContext|
                 ctx.timestamp == unix && ctx.kind == kind && ctx.subject == subject) {
-                for marker in signal.split("; ") {
-                    if !context.signal.split("; ").any(|old| old == marker) {
-                        let joined = format!("{}; {}", context.signal, marker);
-                        if joined.len() <= 160 { context.signal = joined; }
+                if let Some(signal) = signal {
+                    for marker in signal.split("; ") {
+                        if !context.signal.split("; ").any(|old| old == marker) {
+                            let joined = if context.signal.is_empty() {
+                                marker.to_string()
+                            } else { format!("{}; {}", context.signal, marker) };
+                            if joined.len() <= 160 { context.signal = joined; }
+                        }
+                    }
+                }
+                if let Some(message) = message {
+                    if context.journal_messages.len() < 3
+                        && !context.journal_messages.contains(&message) {
+                        context.journal_messages.push(message);
                     }
                 }
             } else {
                 contexts.push(EventContext {
-                    timestamp: unix, kind, subject: subject.clone(), signal,
+                    timestamp: unix, kind, subject: subject.clone(),
+                    signal: signal.unwrap_or_default(),
+                    journal_messages: message.into_iter().collect(),
                 });
             }
         }
@@ -995,6 +1039,15 @@ pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContex
     events.sort_by(|a,b| a.timestamp.cmp(&b.timestamp)
         .then(a.kind.as_str().cmp(b.kind.as_str()))
         .then(a.subject.cmp(&b.subject)));
+    if include_journal_messages {
+        let retained: HashSet<_> = events.iter().rev().take(300)
+            .map(|e| (e.timestamp, e.kind.as_str(), e.subject.clone())).collect();
+        for context in &mut contexts {
+            if !retained.contains(&(context.timestamp, context.kind.as_str(), context.subject.clone())) {
+                context.journal_messages.clear();
+            }
+        }
+    }
     (events, contexts)
 }
 

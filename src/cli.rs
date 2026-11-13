@@ -48,6 +48,8 @@ pub struct Cli {
     pub include_remote_mounts: bool,
     /// Restrict journal observations to the currently running Linux boot.
     pub current_boot: bool,
+    /// Explicit opt-in to original, potentially sensitive classified journal text.
+    pub journal_messages: bool,
     /// For automation: exit with status 1 when a warning is present.
     pub exit_on_warning: bool,
     pub progress_mode: ProgressMode,
@@ -67,6 +69,7 @@ impl Default for Cli {
             disk_details: false,
             include_remote_mounts: false,
             current_boot: false,
+            journal_messages: false,
             exit_on_warning: false,
             progress_mode: ProgressMode::Auto,
         }
@@ -133,6 +136,11 @@ impl Cli {
             }
             if flag == "--current-boot" || flag == "--since-boot" {
                 cli.current_boot = true;
+                i += 1;
+                continue;
+            }
+            if flag == "--journal-messages" {
+                cli.journal_messages = true;
                 i += 1;
                 continue;
             }
@@ -254,6 +262,7 @@ OPTIONS
   --since VALUE    journal lookback: 30m | 24h | 7d (default: 24h)
   --max-events N   maximum journal entries examined (default: 5000; max: 10000)
   --current-boot   restrict journal observations to the current boot
+  --journal-messages  show up to 3 original journal messages/event (sensitive)
   --exit-on-warning  exit with code 1 if any WARNING was found (default: 0)
   --progress       force live diagnostic progress on stderr (even without TTY)
   --no-progress    suppress live diagnostic progress (auto on a terminal)
@@ -269,6 +278,7 @@ EXAMPLES
   whydown diagnose --focus network --since 2h --current-boot
   whydown diagnose --focus system --exit-on-warning
   whydown diagnose --focus all --current-boot --progress
+  whydown diagnose --focus services --journal-messages
   whydown diagnose --focus system --disk-details
   whydown diagnose --format json --output report.json
   whydown diagnose --format html --output report.html

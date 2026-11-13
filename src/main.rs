@@ -65,10 +65,10 @@ fn run() -> Result<u8, String> {
             progress.complete_step();
             snapshot
         }
-        _ => collect::collect_with_options(
+        _ => collect::collect_with_options_and_messages(
             cli.focus, time::now_unix().saturating_sub(cli.since_seconds),
             cli.max_events, cli.disk_details, cli.current_boot,
-            cli.include_remote_mounts, &progress),
+            cli.include_remote_mounts, cli.journal_messages, &progress),
     };
     if cli.command == Command::Demo {
         let since_unix = time::now_unix().saturating_sub(cli.since_seconds);
