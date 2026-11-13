@@ -1445,16 +1445,49 @@ trigger-await\tiW \n";
     #[test]
     fn bounded_service_status_parser_accepts_live_lightdm_state() {
         let text = "LoadState=loaded\nActiveState=active\nSubState=running\nResult=success\nNRestarts=1\n";
-        let status = parse_service_status("lightdm.service", text).unwrap();
+        let status = parse_service_status("lightdm.service", "system", text).unwrap();
         assert_eq!(status.active_state, "active");
         assert_eq!(status.sub_state, "running");
         assert_eq!(status.result, "success");
         assert_eq!(status.n_restarts, Some(1));
-        assert!(parse_service_status("missing.service", "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
+        assert!(parse_service_status("missing.service", "user", "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
         assert!(!safe_service_unit_name("--help.service"));
         assert!(!safe_service_unit_name("../../x.service"));
         assert!(!safe_service_unit_name("test.service\nInjected=true"));
         assert!(safe_service_unit_name("systemd-user@1000.service"));
+    }
+
+    #[test]
+    fn desktop_transient_metadata_and_exit_code_are_scoped_and_private() {
+        let raw = "LoadState=loaded\nActiveState=failed\nSubState=failed\nResult=exit-code\nNRestarts=0\nTransient=yes\nFragmentPath=/usr/share/applications/opera.desktop\nExecMainStatus=24\nExecStart=/usr/bin/opera /home/user/private/document.html\n";
+        let state = parse_service_status("app-opera@abc.service", "user", raw).unwrap();
+        assert_eq!(state.manager, "user");
+        assert_eq!(state.transient, Some(true));
+        assert!(state.desktop_entry);
+        assert_eq!(state.exec_main_status, Some(24));
+        assert!(!format!("{state:?}").contains("private"));
+        assert!(parse_service_status("app-opera@abc.service", "system",
+            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
+        let malicious = raw.replace("/usr/share/applications/opera.desktop",
+            "/home/user/private.desktop");
+        assert!(!parse_service_status("app-opera@abc.service", "user", &malicious)
+            .unwrap().desktop_entry);
+    }
+
+    #[test]
+    fn multiple_systemd_lines_in_same_second_keep_all_safe_diagnostic_codes() {
+        let raw = concat!(
+            "1794507530.100 host systemd[1265]: app-opera@abc.service: Main process exited, code=exited, status=24/n/a user-secret=ABC\n",
+            "1794507530.200 host systemd[1265]: app-opera@abc.service: Failed with result 'exit-code'.\n",
+        );
+        let (events, contexts) = parse_journal_with_context(raw);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].subject.as_deref(), Some("app-opera@abc.service"));
+        let detail = &contexts[0].signal;
+        assert!(detail.contains("exit_status=24"), "{detail}");
+        assert!(detail.contains("systemd_result=exit-code"), "{detail}");
+        assert!(!detail.contains("secret"));
+        assert!(!detail.contains("ABC"));
     }
 
     #[test]
