@@ -1132,6 +1132,79 @@ mod tests {
     }
 
     #[test]
+    fn cleared_opera_desktop_launcher_is_information_not_current_outage() {
+        let unit = "app-opera@d824a1805db343d680ca5e5932b22b70.service";
+        let event = Event {
+            timestamp: 1794565130,
+            kind: EventKind::ServiceFailure,
+            subject: Some(unit.into()),
+            source: Some("systemd".into()),
+        };
+        let hint = crate::model::EventContext {
+            timestamp: event.timestamp,
+            kind: event.kind,
+            subject: event.subject.clone(),
+            signal: "exit_status=24; process_code=exited; systemd_result=exit-code".into(),
+        };
+        let clean = Snapshot {
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            events: vec![event.clone()],
+            event_contexts: vec![hint.clone()],
+            journal_checked: true,
+            ..Snapshot::default()
+        };
+        let report = analyze(clean, 14_400, Focus::Services, false);
+        assert!(!report.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+        let finding = report.findings.iter().find(|f| f.id == "DESKTOP_LAUNCH_EXIT_LOGS").unwrap();
+        assert_eq!(finding.severity, Severity::Info);
+        assert_eq!(finding.scope(), "historical_journal");
+        assert!(finding.title.contains("app-opera"));
+        assert!(finding.evidence.iter().any(|s|
+            s.contains("exit_status=24") && s.contains("systemd_result=exit-code")));
+        assert!(!finding.explanation.contains("successfully opened"));
+
+        // An unrelated, unattributed service-failure message must remain a
+        // warning; it must not be attributed to Opera or silently discarded.
+        let unrelated = Event {
+            timestamp: 1794565000,
+            kind: EventKind::ServiceFailure,
+            subject: None,
+            source: Some("systemd".into()),
+        };
+        let mixed = Snapshot {
+            system_units_checked: true,
+            failed_user_units: Some(vec![]),
+            events: vec![unrelated, event.clone()],
+            event_contexts: vec![hint.clone()],
+            journal_checked: true,
+            ..Snapshot::default()
+        };
+        let result = analyze(mixed, 14_400, Focus::Services, false);
+        let generic = result.findings.iter().find(|f| f.id == "SERVICE_FAILURE_LOGS").unwrap();
+        assert_eq!(generic.severity, Severity::Warning);
+        assert!(generic.evidence.iter().any(|text| text.contains("1 entry without an identified unit")));
+        assert!(result.findings.iter().any(|f| f.id == "DESKTOP_LAUNCH_EXIT_LOGS"));
+        assert!(result.service_event_windows.iter().any(|w| w.units.contains(&unit.to_string())));
+
+        // A still-failed user unit or an exit 1 must not be down-ranked.
+        for (failed, signal) in [(true, "exit_status=24"), (false, "exit_status=1/FAILURE")] {
+            let snapshot = Snapshot {
+                system_units_checked: true,
+                failed_user_units: Some(if failed { vec![unit.into()] } else { vec![] }),
+                events: vec![event.clone()],
+                event_contexts: vec![crate::model::EventContext {
+                    signal: signal.into(), ..hint.clone()
+                }],
+                ..Snapshot::default()
+            };
+            let outcome = analyze(snapshot, 3600, Focus::Services, false);
+            assert!(!outcome.findings.iter().any(|f| f.id == "DESKTOP_LAUNCH_EXIT_LOGS"));
+            assert!(outcome.findings.iter().any(|f| f.id == "SERVICE_FAILURE_LOGS"));
+        }
+    }
+
+    #[test]
     fn current_user_failed_units_have_current_snapshot_scope() {
         let snapshot = Snapshot {
             failed_user_units: Some(vec!["broken-user.service".into()]),
