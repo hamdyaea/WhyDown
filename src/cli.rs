@@ -300,6 +300,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn journal_messages_are_explicitly_opt_in() {
+        assert!(!Cli::parse(["diagnose"]).unwrap().journal_messages);
+        assert!(Cli::parse(["diagnose", "--journal-messages"]).unwrap().journal_messages);
+        assert!(Cli::parse(["tui", "--journal-messages"]).unwrap().journal_messages);
+    }
+
+    #[test]
     fn tui_parsing_and_output_safety() {
         let tui = Cli::parse(["tui", "--demo", "--focus", "services", "--since", "4h",
             "--current-boot", "--max-events", "10000"]).unwrap();
