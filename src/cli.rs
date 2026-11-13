@@ -231,6 +231,8 @@ USAGE
   whydown tui --demo
   whydown gui [OPTIONS]
   whydown gui --demo
+  whydown nagios check --metric memory --warning 80 --critical 95
+  whydown nagios dashboard --history nagios.tsv --output dashboard.html
   whydown logo                  # show the ASCII project mark
   whydown icon > whydown.png   # export embedded PNG icon
   whydown --help
@@ -240,6 +242,7 @@ COMMANDS
   demo             Show a safe, deterministic example (no system inspection)
   tui              Guided terminal evidence browser (requires a terminal)
   gui              Modern Qt6 desktop GUI (Python 3 + PyQt6, optional)
+  nagios           Nagios/Icinga plugin checks with perfdata and offline graphs
   logo             Show the portable ASCII project logo
   icon             Write the official PNG app icon to stdout (binary)
   help             Show this help
@@ -274,6 +277,7 @@ EXAMPLES
   whydown tui --demo
   whydown gui                     # all checks / 4h / current boot / 10000 entries
   whydown gui --demo              # fictional GUI, no host inspection
+  whydown nagios --help           # fast plugin checks and SVG/HTML graphs
 
 Read-only. Offline. No root required (journal access may be limited).
 Reports are diagnostic hints, not proof of a root cause.
