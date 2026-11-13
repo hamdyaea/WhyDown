@@ -1028,10 +1028,10 @@ mod tests {
     #[test]
     fn diagnostic_indicators_are_specific_but_never_include_raw_log_secrets() {
         let logs = concat!(
-            "1794499327.0 machine kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff (Reason: 2=PREV_AUTH_NOT_VALID) secret=keep-me-private\\n",
-            "1794499328.0 machine systemd[1]: sshd.service: Main process exited, code=exited, status=1/FAILURE token=topsecret\\n",
-            "1794499329.0 machine NetworkManager[8]: device (wlan0): state change: activated -> disconnected (reason 'carrier-changed')\\n",
-            "1794499330.0 machine systemd-resolved[44]: DNS query SERVFAIL for account.internal.example\\n",
+            "1794499327.0 machine kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff (Reason: 2=PREV_AUTH_NOT_VALID) secret=keep-me-private\n",
+            "1794499328.0 machine systemd[1]: sshd.service: Main process exited, code=exited, status=1/FAILURE token=topsecret\n",
+            "1794499329.0 machine NetworkManager[8]: device (wlan0): state change: activated -> disconnected (reason 'carrier-changed')\n",
+            "1794499330.0 machine systemd-resolved[44]: DNS query SERVFAIL for account.internal.example\n",
         );
         let (events, contexts) = parse_journal_with_context(logs);
         assert_eq!(events.len(), 4);
