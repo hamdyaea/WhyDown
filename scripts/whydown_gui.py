@@ -247,9 +247,24 @@ FINDING_EVENT_KINDS = {
 
 
 def related_events(report, finding):
-    kinds = FINDING_EVENT_KINDS.get(finding.get("id"), ())
-    return [event for event in report.get("timeline", [])
-            if isinstance(event, dict) and event.get("kind") in kinds]
+    rule = finding.get("id")
+    kinds = FINDING_EVENT_KINDS.get(rule, ())
+    events = [event for event in report.get("timeline", [])
+              if isinstance(event, dict) and event.get("kind") in kinds]
+    # These rules describe a particular unit/interface or a particular
+    # correlated pair. Do not display unrelated events of the same kind.
+    evidence = [str(v) for v in (finding.get("evidence") or [])]
+    if rule in ("SERVICE_RESTART_OBSERVED", "WIFI_LOCAL_ROAM_OBSERVED") and evidence:
+        target = evidence[0].split(":", 1)[0].strip()
+        if re.fullmatch(r"[a-zA-Z0-9_.@-]{1,64}", target):
+            events = [e for e in events if e.get("subject") == target]
+    elif rule in ("LINK_BEFORE_DNS", "DHCP_BEFORE_DNS") and len(evidence) >= 2:
+        # The Rust rule stores precisely the paired timestamps in evidence.
+        times = set(re.findall(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+                               " ".join(evidence[:2])))
+        if times:
+            events = [e for e in events if e.get("timestamp") in times]
+    return events
 
 
 def affected_targets(report, finding, events=None):
