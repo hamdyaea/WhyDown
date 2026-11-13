@@ -2,6 +2,21 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.12.0] - 2026-11-13
+
+### Native Nagios/Icinga monitoring and offline trend charts
+- Introduce `whydown nagios check` with standard plugin output (OK/WARNING/CRITICAL/UNKNOWN and exit codes 0/1/2/3) and native Nagios/Monitoring Plugins performance data. No CLI banners, JSON, ANSI progress or unrelated output is mixed into the plugin result.
+- Provide twelve fast, host-wide metrics: memory/swap usage, local disk and inode capacity, load/core ratio, CPU/memory/I/O PSI, kernel file-handle use, default route presence, configured DNS nameservers and currently failed systemd units. Add a targeted named systemd check (`--metric service --unit UNIT`) that returns 1/0 and CRITICAL when the named unit is inactive. Sensor unavailability produces UNKNOWN instead of false zero.
+- Support standard Nagios threshold ranges (including `~:` and `@`), metric-specific WARN/CRIT overrides, bounded subprocesses and a global sampling timeout. Unlike the evidence-oriented diagnostics, routine checks do not scan the journal.
+- Add opt-in `--record` to append private (0600) time-stamped metric samples with configured thresholds. No files are written without explicit consent.
+- Add `whydown nagios graph` for self-contained SVG time-series plots and `whydown nagios dashboard` for a standalone dark HTML dashboard. No JavaScript, network, external Rust packages or background daemon. Graphs use actual observed timestamps, retain spikes in downsampled histories, distinguish demo data and never invent a trend from one timestamp.
+- Supply production Nagios/Icinga command examples, perfdata/PNP4Nagios guidance, defaults, privacy and history retention in `docs/NAGIOS.md`. Keep the README concise.
+
+### Verification
+- Rust unit tests for ranges, perfdata, missing metrics, graphic sampling and file safety.
+- CLI integration tests for all four exit statuses, demo samples, optional recording, privacy, SVG/HTML exports and no-overwrite guarantees.
+- Native host field testing on CachyOS, Manjaro and Debian remains to be confirmed.
+
 ## [0.11.0] - 2026-11-13
 
 ### Evidence-first incident investigation

@@ -10,7 +10,11 @@ use whydown::progress::Progress;
 use whydown::{analyze, collect, demo, render, time};
 
 fn run() -> Result<u8, String> {
-    let cli = Cli::parse(std::env::args().skip(1)).map_err(|e| format!("{e}\nRun `whydown --help` for usage."))?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|first| first == "nagios") {
+        return Ok(whydown::nagios::run(&args[1..]));
+    }
+    let cli = Cli::parse(args).map_err(|e| format!("{e}\nRun `whydown --help` for usage."))?;
 
     match cli.command {
         Command::Help => {

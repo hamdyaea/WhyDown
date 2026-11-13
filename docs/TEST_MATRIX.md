@@ -342,3 +342,23 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - Qt6 GUI unit tests verify DNS, Wi-Fi, systemd and current snapshot cases; they prevent event leakage between unrelated findings and enforce bounded output.
 - Real GUI Xvfb smoke test double-clicks the first alert, navigates to the second details page, checks evidence/controls, inspects a timeline event and returns to overview; original mouse text selection and Ctrl+C remain tested.
 - Live diagnostic testing on CachyOS/Manjaro/Debian and privacy review of real logs remain outstanding field checks.
+
+## v0.12.0 — Nagios/Icinga plugin and offline charting
+
+- Verify `whydown nagios check --metric all` returns **only** native Nagios
+  plugin output with perfdata, no ASCII branding or diagnostic progress.
+- Check normal and custom warning/critical ranges, UNKNOWN on missing
+  collectors and invalid invocations, and overall state aggregation.
+- Check each fast Linux sensor: /proc/meminfo, PSI, file-nr, /proc/loadavg,
+  route table, resolv.conf, bounded local `df` and `systemctl --failed`.
+  No active DNS/connectivity requests and no full journal scan.
+- The named systemd check requires a strictly validated `--unit`, returns 1/0 `service_active` perfdata, and is excluded from aggregate `all`.
+- Confirm opt-in `--record` creates 0600 history and appends actual timestamped
+  readings and configured thresholds; default checks do not create any files.
+- Confirm `nagios graph` SVG and `nagios dashboard` offline HTML: graphs
+  require at least two distinct timestamps before drawing a trend;
+  fictional data are marked; scripts, fonts and network assets are absent.
+- Check safe graph output file creation, atomic replacement with
+  `--overwrite`, and refusal to overwrite history itself.
+- Manual field validation remains pending on CachyOS, Manjaro, Debian/Ubuntu,
+  ARM64 and a real Nagios/PNP4Nagios monitoring server.

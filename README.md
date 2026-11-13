@@ -60,6 +60,7 @@ Verify before starting: `sh scripts/install.sh --check-gui-prereqs`.
 | **Graphical GUI** | `~/.local/bin/whydown gui` | Desktop, mouse navigation, evidence and timeline |
 | **Terminal TUI** | `~/.local/bin/whydown tui` | SSH, servers, guided menus |
 | **Command line** | `~/.local/bin/whydown diagnose` | Shell, scripts, automation |
+| **Nagios / Icinga** | `~/.local/bin/whydown nagios check --metric all` | Monitoring, thresholds, performance data |
 
 If `~/.local/bin` is in your `PATH`, use `whydown` instead of the full path.
 
@@ -100,6 +101,18 @@ read-only verification commands. Nothing is repaired or uploaded.
 # Show the WD project logo in ASCII
 ~/.local/bin/whydown logo
 ```
+
+## Nagios / Icinga monitoring and graphs
+
+Standard plugin states, thresholds, performance data and offline SVG/HTML charts:
+
+```bash
+whydown nagios check --metric memory --warning 80 --critical 95
+whydown nagios check --metric all --record /path/to/private/nagios.tsv
+whydown nagios dashboard --history /path/to/private/nagios.tsv --output dashboard.html
+```
+
+Create the history directory first. See [Nagios setup](docs/NAGIOS.md).
 
 ## Update WhyDown
 

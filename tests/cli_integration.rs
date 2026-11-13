@@ -1,11 +1,115 @@
 use std::process::Command;
 use std::fs;
+use std::io::Write;
 
 fn whydown(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_whydown"))
         .args(args)
         .output()
         .expect("Whydown binary should launch")
+}
+
+#[test]
+fn nagios_checks_report_all_four_states_with_standards_compliant_perfdata() {
+    let ok = whydown(&["nagios","check","--metric","memory","--demo"]);
+    assert_eq!(ok.status.code(), Some(0));
+    let o = String::from_utf8(ok.stdout).unwrap();
+    assert!(o.starts_with("WHYDOWN OK DEMO - memory 62.50%"));
+    assert!(o.contains("| 'mem_used_pct'=62.50%;80;95;0;100"));
+    assert!(ok.stderr.is_empty());
+
+    let warning = whydown(&["nagios","--demo"]);
+    assert_eq!(warning.status.code(), Some(1));
+    let w = String::from_utf8(warning.stdout).unwrap();
+    assert!(w.starts_with("WHYDOWN WARNING DEMO -"));
+    assert!(w.contains("'failed_units'=1.00;0;0:2;0;"));
+
+    let critical = whydown(&["nagios","check","--metric","memory","--critical","50","--demo"]);
+    assert_eq!(critical.status.code(), Some(2));
+    assert!(String::from_utf8(critical.stdout).unwrap().starts_with("WHYDOWN CRITICAL DEMO -"));
+
+    let service = whydown(&["nagios","check","--metric","service",
+        "--unit","example-backup.service","--demo"]);
+    assert_eq!(service.status.code(), Some(0));
+    assert!(String::from_utf8(service.stdout).unwrap().contains("'service_active'=1.00;~:;1:;0;1"));
+    for invalid in [
+        vec!["nagios","--metric","service","--demo"],
+        vec!["nagios","--metric","service","--unit","example.service;rm","--demo"],
+        vec!["nagios","--metric","memory","--unit","example.service","--demo"],
+    ] {
+        assert_eq!(whydown(&invalid).status.code(), Some(3));
+    }
+
+    let unknown = whydown(&["nagios","check","--metric","not-a-check","--demo"]);
+    assert_eq!(unknown.status.code(), Some(3));
+    assert!(String::from_utf8(unknown.stdout).unwrap().starts_with("WHYDOWN UNKNOWN -"));
+    assert!(unknown.stderr.is_empty());
+    let bad = whydown(&["nagios","--metric","all","--warning","70","--demo"]);
+    assert_eq!(bad.status.code(), Some(3));
+}
+
+#[test]
+fn nagios_recording_svg_dashboard_and_private_file_safety() {
+    let base = std::env::temp_dir().join(format!("whydown-nagios-test-{}", std::process::id()));
+    fs::create_dir_all(&base).unwrap();
+    let history = base.join("metric.tsv");
+    let svg = base.join("memory.svg");
+    let html = base.join("dashboard.html");
+    let _ = fs::remove_file(&history);
+    let _ = fs::remove_file(&svg);
+    let _ = fs::remove_file(&html);
+    let h = history.to_str().unwrap();
+    let g = svg.to_str().unwrap();
+    let d = html.to_str().unwrap();
+
+    for _ in 0..2 {
+        let recorded = whydown(&["nagios","check","--demo","--record",h]);
+        assert_eq!(recorded.status.code(), Some(1));
+    }
+    let lines: Vec<_> = fs::read_to_string(&history).unwrap().lines()
+        .map(str::to_string).collect();
+    assert_eq!(lines.len(), (whydown::nagios::SPECS.len() - 1) * 2); // named service is excluded from all
+    assert!(lines.iter().any(|l| l.contains("\tmem_used_pct\t62.5000\tOK\tdemo")));
+    // Repeated samples in the same second are not a trend. Simulate a
+    // distinct later timestamp to exercise an actual time-series line.
+    let first_ts: u64 = lines[0].split('\t').next().unwrap().parse().unwrap();
+    let later = format!("{}\tmem_used_pct\t75.0000\tOK\tlive\t80\t95\n",
+        first_ts + 300);
+    std::fs::OpenOptions::new().append(true).open(&history).unwrap()
+        .write_all(later.as_bytes()).unwrap();
+
+    let graphed = whydown(&["nagios","graph","--history",h,"--metric","memory",
+        "--output",g]);
+    assert_eq!(graphed.status.code(), Some(0), "{:?}", graphed.stderr);
+    let plot = fs::read_to_string(&svg).unwrap();
+    assert!(plot.starts_with("<svg "));
+    assert!(plot.contains("<polyline"));
+    assert!(plot.contains("75.00%")); // newest real timestamp, not the older demo reading
+    let existing = whydown(&["nagios","graph","--history",h,"--metric","memory",
+        "--output",g]);
+    assert_eq!(existing.status.code(), Some(3));
+    let replaced = whydown(&["nagios","graph","--history",h,"--metric","memory",
+        "--output",g,"--overwrite"]);
+    assert_eq!(replaced.status.code(), Some(0));
+
+    let dashboard = whydown(&["nagios","dashboard","--history",h,"--output",d]);
+    assert_eq!(dashboard.status.code(), Some(0));
+    let page = fs::read_to_string(&html).unwrap();
+    assert!(page.contains("WhyDown"));
+    assert!(page.contains("DEMO DATA PRESENT"));
+    assert!(page.contains("mem_used_pct"));
+    assert!(page.contains("<svg "));
+    let protect = whydown(&["nagios","graph","--history",h,"--metric","memory",
+        "--output",h,"--overwrite"]);
+    assert_eq!(protect.status.code(), Some(3));
+
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        for file in [&history, &svg, &html] {
+            assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o077, 0);
+        }
+    }
+    fs::remove_dir_all(base).unwrap();
 }
 
 #[test]
