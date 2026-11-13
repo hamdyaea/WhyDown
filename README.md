@@ -104,20 +104,17 @@ read-only verification commands. Nothing is repaired or uploaded.
 
 ## Nagios / Icinga monitoring and graphs
 
-WhyDown also works as a native monitoring plugin (standard Nagios exit codes,
-configurable thresholds and performance data). Record time-stamped samples only
-when requested, then create standalone SVG graphs or an offline HTML dashboard:
+Native plugin checks (0/1/2/3 exit codes, thresholds and performance data)
+and opt-in local SVG/HTML trend charts:
 
 ```bash
 whydown nagios check --metric memory --warning 80 --critical 95
-whydown nagios check --metric all
 whydown nagios check --metric all --record /path/to/private/nagios.tsv
 whydown nagios dashboard --history /path/to/private/nagios.tsv --output dashboard.html
 ```
 
-The folder for recorded samples must already exist. **See the
-[Nagios setup and graphing guide](docs/NAGIOS.md)** for Icinga/Nagios
-configuration, PNP4Nagios, individual SVG charts, defaults and privacy.
+Create the history directory first. See the [Nagios setup and graphing guide](docs/NAGIOS.md)
+for threshold details, Icinga/PNP4Nagios integration and individual SVG charts.
 
 ## Update WhyDown
 
