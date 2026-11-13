@@ -21,8 +21,8 @@ They do not modify any services.
 
 **Arch / Manjaro / CachyOS**: the same AUR `PKGBUILD` works on all three.
 Find the ready-to-submit stable source recipe in
-[`packaging/aur/whydown/`](packaging/aur/whydown/) and deployment instructions
-in [AUR packaging](packaging/aur/README.md). A `whydown-bin` recipe may also
+[`packaging/aur/whydown/`](../packaging/aur/whydown/) and deployment instructions
+in [AUR packaging](../packaging/aur/README.md). A `whydown-bin` recipe may also
 be supplied with pinned checksums once the corresponding release archives exist.
 AUR submissions are independent of GitHub Releases and require AUR SSH access.
 Do not install both the source and binary variants.
