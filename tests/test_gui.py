@@ -169,6 +169,51 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("No event of this class", standalone)
         self.assertIn("No specific check supplied", standalone)
 
+    def test_historical_opera_exit_24_has_user_scope_and_safe_dossier_commands(self):
+        data = self.fixture()
+        unit = "app-opera@d824a1805db343d680ca5e5932b22b70.service"
+        data["system"]["system_units_checked"] = True
+        data["system"]["failed_units"] = []
+        data["system"]["failed_user_units"] = []
+        data["system"]["service_statuses"] = [{
+            "unit": unit, "manager": "user", "transient": True,
+            "desktop_entry": True, "exec_main_status": 24,
+            "load_state": "loaded", "active_state": "inactive",
+            "sub_state": "dead", "result": "exit-code", "n_restarts": 0,
+        }]
+        data["timeline"] = [
+            {"timestamp": "2026-11-13T10:18:50Z",
+             "kind": "service_failure", "subject": unit,
+             "source": "systemd",
+             "diagnostic_hint": "exit_status=24; process_code=exited; systemd_result=exit-code"},
+            {"timestamp": "2026-11-13T10:14:48Z",
+             "kind": "service_failure", "subject": None,
+             "source": "systemd", "diagnostic_hint": None},
+        ]
+        desktop = {
+            "id": "DESKTOP_LAUNCH_EXIT_LOGS",
+            "title": "Historical desktop launcher exit",
+            "severity": "info", "confidence": "moderate",
+            "scope": "historical_journal",
+            "explanation": "User-session GUI launcher exited",
+            "evidence": [f"Desktop app unit(s): {unit}", "exit_status=24"],
+            "checks": ["Verify intended document opened"],
+        }
+        data["findings"] = [desktop]
+        matching = gui.related_events(data, desktop)
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["subject"], unit)
+        info = gui.detailed_incident(data, desktop)
+        self.assertIn("exit_status=24", info)
+        self.assertIn("[user manager]", info)
+        self.assertIn("transient=True", info)
+        self.assertIn("desktop_launcher=True", info)
+        self.assertIn("systemctl --user status", info)
+        self.assertIn(f"journalctl --user -u {unit}", info)
+        self.assertNotIn("systemctl status " + unit, info)
+        self.assertNotIn("2026-11-13T10:14:48Z", info.split(
+            "CLASSIFIED JOURNAL EVENTS")[1].split("SPECIFIC COLLECTED EVIDENCE")[0])
+
     def test_unit_scoped_restart_and_temporal_correlation_do_not_mix_events(self):
         data = self.fixture()
         data["timeline"] = [

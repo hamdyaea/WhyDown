@@ -253,9 +253,11 @@ pub fn collect_with_options(
         )),
     }
 
-    // Historical systemd failure messages are not proof that the unit is still
-    // failed. Query only a few strictly validated system-unit names using a
-    // bounded, read-only subprocess. Never query names supplied as CLI options.
+    // A historical failure is never proof of a currently failed service.
+    // Query only whitelisted journal-attributed units, never command-line names.
+    // A system unit may not exist in the user's manager and vice versa:
+    // probe both bounded managers, record *which manager answered*, and never
+    // invent an active state when a transient GUI unit has disappeared.
     if focus.includes(Focus::Services) && snapshot.journal_checked {
         let mut names: Vec<String> = snapshot.events.iter()
             .filter(|e| e.kind == EventKind::ServiceFailure)
@@ -267,29 +269,48 @@ pub fn collect_with_options(
         names.dedup();
         names.truncate(4);
         for name in names {
-            progress.detail("systemctl show historical failure unit (max 3s each)");
-            let args = ["show", "--no-pager",
-                "--property=LoadState,ActiveState,SubState,Result,NRestarts",
-                "--", name.as_str()];
-            let start = Instant::now();
-            let state = run_capture_with_limits(
-                "systemctl", &args, Duration::from_secs(3), 8 * 1024);
-            snapshot.collector_timings.push(CollectorTiming {
-                name: "systemd historical unit status",
-                elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                succeeded: matches!(&state, Ok((true, _))),
-            });
-            match state {
-                Ok((true, output)) => {
-                    if let Some(status) = parse_service_status(&name, &output) {
-                        snapshot.service_statuses.push(status);
-                    } else {
-                        snapshot.notes.push(format!(
-                            "Current system-manager status unavailable for {name}; not assumed active"));
-                    }
+            let user_first = snapshot.failed_user_units.as_ref()
+                .is_some_and(|units| units.contains(&name))
+                || name.starts_with("app-");
+            let managers = if user_first { ["user", "system"] }
+                else { ["system", "user"] };
+            let mut found = None;
+            for manager in managers {
+                if manager == "user" && snapshot.failed_user_units.is_none() {
+                    // The user manager was unavailable during collection.
+                    continue;
                 }
-                _ => snapshot.notes.push(format!(
-                    "Could not query current system-manager status for {name}; not assumed active")),
+                progress.detail("systemctl show historical unit in correct manager (max 3s each)");
+                let property = "--property=LoadState,ActiveState,SubState,Result,NRestarts,Transient,FragmentPath,ExecMainStatus";
+                let args_user = ["--user", "show", "--no-pager", property, "--", name.as_str()];
+                let args_system = ["show", "--no-pager", property, "--", name.as_str()];
+                let args: &[&str] = if manager == "user" { &args_user } else { &args_system };
+                let start = Instant::now();
+                let state = run_capture_with_limits(
+                    "systemctl", args, Duration::from_secs(3), 8 * 1024);
+                let parsed = match state {
+                    Ok((true, output)) => parse_service_status(&name, manager, &output),
+                    _ => None,
+                };
+                snapshot.collector_timings.push(CollectorTiming {
+                    name: if manager == "user" {
+                        "systemd user historical unit status"
+                    } else {
+                        "systemd system historical unit status"
+                    },
+                    elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                    succeeded: parsed.is_some(),
+                });
+                if parsed.is_some() {
+                    found = parsed;
+                    break;
+                }
+            }
+            if let Some(status) = found {
+                snapshot.service_statuses.push(status);
+            } else {
+                snapshot.notes.push(format!(
+                    "Current unit state unavailable for {name} in accessible system/user managers;                      transient units may have disappeared; state not assumed active"));
             }
         }
     }
@@ -609,16 +630,36 @@ fn safe_service_unit_name(unit: &str) -> bool {
             || matches!(b, b'@' | b'.' | b'_' | b'-' | b':'))
 }
 
-fn parse_service_status(unit: &str, output: &str) -> Option<ServiceStatus> {
-    if !safe_service_unit_name(unit) { return None; }
+fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<ServiceStatus> {
+    if !safe_service_unit_name(unit) || !matches!(manager, "system" | "user") {
+        return None;
+    }
     let mut load = None;
     let mut active = None;
     let mut sub = None;
     let mut result = None;
     let mut n_restarts = None;
+    let mut transient = None;
+    let mut desktop_entry = false;
+    let mut exec_main_status = None;
     for line in output.lines() {
         let Some((key, value)) = line.split_once('=') else { continue };
         let value = value.trim();
+        // Never keep arbitrary FragmentPath/ExecStart contents. Retain only
+        // the boolean that the unit came from a .desktop launcher.
+        if key == "FragmentPath" {
+            desktop_entry = value.starts_with("/usr/share/applications/")
+                && value.ends_with(".desktop") && value.len() <= 256;
+            continue;
+        }
+        if key == "Transient" {
+            transient = match value { "yes" => Some(true), "no" => Some(false), _ => None };
+            continue;
+        }
+        if key == "ExecMainStatus" {
+            exec_main_status = value.parse::<u64>().ok().filter(|n| *n <= 255);
+            continue;
+        }
         if value.len() > 64 || !value.bytes().all(|c| c.is_ascii_alphanumeric()
             || matches!(c, b'-' | b'_')) { continue; }
         match key {
@@ -631,12 +672,12 @@ fn parse_service_status(unit: &str, output: &str) -> Option<ServiceStatus> {
         }
     }
     let load_state = load?;
-    // Avoid claiming a system-unit status for user-only/unknown unit names.
     if load_state == "not-found" { return None; }
     Some(ServiceStatus {
-        unit: unit.to_owned(), load_state,
-        active_state: active?, sub_state: sub?, result: result?,
-        n_restarts,
+        unit: unit.to_owned(), manager: manager.to_owned(),
+        transient, desktop_entry, exec_main_status,
+        load_state, active_state: active?, sub_state: sub?,
+        result: result?, n_restarts,
     })
 }
 
@@ -787,6 +828,7 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for (marker, label) in [
         ("status=", "exit_status"),
+        ("code=", "process_code"),
         ("reason=", "reason"),
         ("reason: ", "reason"),
         ("failed with result ", "systemd_result"),
@@ -839,6 +881,9 @@ fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
                                 "exit-code" | "signal" | "core-dump" | "timeout"
                                 | "start-limit-hit" | "resources" | "protocol"
                                 | "watchdog" | "oom-kill" | "success") => Some(value),
+                    "process_code" if matches!(kind, EventKind::ServiceFailure) &&
+                        matches!(value.to_ascii_lowercase().as_str(),
+                            "exited" | "killed" | "dumped") => Some(value),
                     "errno" if digits(&value, 4) => Some(value),
                     _ => None,
                 };
@@ -919,12 +964,29 @@ pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContex
             continue;
         }
         let subject = event_subject(body, kind);
-        if seen.insert((unix, kind.as_str(), subject.clone())) {
-            if let Some(signal) = diagnostic_signal(body, kind) {
+        // Merge *whitelisted diagnostic indicators* across different journal
+        // lines describing the same incident in the same second. The
+        // classified event itself remains deduplicated. In particular,
+        // "Main process exited ... status=24" and "Failed with result
+        // 'exit-code'" are complementary evidence, not separate incidents.
+        // Raw journal text, URLs and command arguments are never copied.
+        let signal = diagnostic_signal(body, kind);
+        if let Some(signal) = signal {
+            if let Some(context) = contexts.iter_mut().find(|ctx: &&mut EventContext|
+                ctx.timestamp == unix && ctx.kind == kind && ctx.subject == subject) {
+                for marker in signal.split("; ") {
+                    if !context.signal.split("; ").any(|old| old == marker) {
+                        let joined = format!("{}; {}", context.signal, marker);
+                        if joined.len() <= 160 { context.signal = joined; }
+                    }
+                }
+            } else {
                 contexts.push(EventContext {
                     timestamp: unix, kind, subject: subject.clone(), signal,
                 });
             }
+        }
+        if seen.insert((unix, kind.as_str(), subject.clone())) {
             events.push(Event {
                 timestamp: unix, kind, subject, source,
             });
@@ -1383,16 +1445,49 @@ trigger-await\tiW \n";
     #[test]
     fn bounded_service_status_parser_accepts_live_lightdm_state() {
         let text = "LoadState=loaded\nActiveState=active\nSubState=running\nResult=success\nNRestarts=1\n";
-        let status = parse_service_status("lightdm.service", text).unwrap();
+        let status = parse_service_status("lightdm.service", "system", text).unwrap();
         assert_eq!(status.active_state, "active");
         assert_eq!(status.sub_state, "running");
         assert_eq!(status.result, "success");
         assert_eq!(status.n_restarts, Some(1));
-        assert!(parse_service_status("missing.service", "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
+        assert!(parse_service_status("missing.service", "user", "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
         assert!(!safe_service_unit_name("--help.service"));
         assert!(!safe_service_unit_name("../../x.service"));
         assert!(!safe_service_unit_name("test.service\nInjected=true"));
         assert!(safe_service_unit_name("systemd-user@1000.service"));
+    }
+
+    #[test]
+    fn desktop_transient_metadata_and_exit_code_are_scoped_and_private() {
+        let raw = "LoadState=loaded\nActiveState=failed\nSubState=failed\nResult=exit-code\nNRestarts=0\nTransient=yes\nFragmentPath=/usr/share/applications/opera.desktop\nExecMainStatus=24\nExecStart=/usr/bin/opera /home/user/private/document.html\n";
+        let state = parse_service_status("app-opera@abc.service", "user", raw).unwrap();
+        assert_eq!(state.manager, "user");
+        assert_eq!(state.transient, Some(true));
+        assert!(state.desktop_entry);
+        assert_eq!(state.exec_main_status, Some(24));
+        assert!(!format!("{state:?}").contains("private"));
+        assert!(parse_service_status("app-opera@abc.service", "system",
+            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n").is_none());
+        let malicious = raw.replace("/usr/share/applications/opera.desktop",
+            "/home/user/private.desktop");
+        assert!(!parse_service_status("app-opera@abc.service", "user", &malicious)
+            .unwrap().desktop_entry);
+    }
+
+    #[test]
+    fn multiple_systemd_lines_in_same_second_keep_all_safe_diagnostic_codes() {
+        let raw = concat!(
+            "1794507530.100 host systemd[1265]: app-opera@abc.service: Main process exited, code=exited, status=24/n/a user-secret=ABC\n",
+            "1794507530.200 host systemd[1265]: app-opera@abc.service: Failed with result 'exit-code'.\n",
+        );
+        let (events, contexts) = parse_journal_with_context(raw);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].subject.as_deref(), Some("app-opera@abc.service"));
+        let detail = &contexts[0].signal;
+        assert!(detail.contains("exit_status=24"), "{detail}");
+        assert!(detail.contains("systemd_result=exit-code"), "{detail}");
+        assert!(!detail.contains("secret"));
+        assert!(!detail.contains("ABC"));
     }
 
     #[test]

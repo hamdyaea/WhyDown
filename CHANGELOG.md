@@ -2,6 +2,21 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.12.1] - 2026-11-13
+
+### CachyOS systemd user-session incident context
+- Fix false association of user-session **transient GUI launchers** with the **system** manager. Bounded read-only historical queries now check the appropriate user/system managers and record the verified manager, with safe fallback and an explicit unknown state when an expired transient unit has disappeared.
+- Extract **ExecMainStatus** (numeric only), `Transient` and a boolean desktop-entry marker from trusted `systemctl show` properties. Never store command-line arguments, executable paths, desktop filenames, raw journal messages, or sensitive data.
+- Preserve multiple **whitelisted diagnostic indicators** from duplicate same-second journal messages while keeping **one classified event**. E.g., Opera's `code=exited, status=24/n/a` and `Failed with result 'exit-code'` now produce complementary `process_code=exited`, `exit_status=24`, and `systemd_result=exit-code`.
+- Identify a **narrowly defined, no-longer-failed** `app-*.service` launcher exit with observed status 24 as an **informational historical desktop-launcher observation**, not an active systemd outage. This is not proof that opening the GUI document succeeded. **Unattributed or other service failure messages remain separate warnings**, and still-failed units or other exit statuses are never downgraded.
+- Print retained, sanitized event status codes in CLI timeline; include verified manager, numeric exit status, transient/desktop classification in CLI/HTML/JSON and Qt incident dossiers. Suggest correctly scoped `systemctl --user` / `journalctl --user` commands for user units, with safe identifier validation.
+- JSON **schema remains 2**, with additional optional metadata under `system.service_statuses[]`; routine Nagios checks and their machine-readable output are unchanged.
+
+### Validation
+- Rust regression fixtures for the exact CachyOS Opera-style same-second log lines, user-manager scope, data privacy, disappearance of transient units, and separation of cleared launcher events from unrelated historical warnings.
+- Qt GUI unit tests for matching only relevant historical events, displaying manager-specific states, and providing safe user-manager check commands; original CI and static build targets must still pass.
+- This update is CI-tested. A live v0.12.1 post-upgrade scan on CachyOS remains to be verified; the provided CachyOS v0.12.0 logs are the reproduction basis.
+
 ## [0.12.0] - 2026-11-13
 
 ### Native Nagios/Icinga monitoring and offline trend charts

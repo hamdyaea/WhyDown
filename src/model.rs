@@ -258,11 +258,21 @@ pub struct ServiceEventWindow {
     pub units: Vec<String>,
 }
 
-/// Read-only current system-manager state for a journal-attributed service.
-/// Active does not imply application readiness and cannot prove a past recovery.
+/// Read-only state for a journal-attributed service in the verified manager.
+/// Active does not imply application readiness or prove past recovery.
+
 #[derive(Debug, Clone)]
 pub struct ServiceStatus {
     pub unit: String,
+    /// "system" or "user"; based on the manager queried, never inferred from a name.
+    pub manager: String,
+    /// Whether this is a systemd transient unit.
+    pub transient: Option<bool>,
+    /// True only if the installed FragmentPath is a desktop launcher.
+    /// No paths or command arguments are retained.
+    pub desktop_entry: bool,
+    /// Numeric exit status from systemctl show, not a diagnosis of its cause.
+    pub exec_main_status: Option<u64>,
     pub load_state: String,
     pub active_state: String,
     pub sub_state: String,
@@ -348,7 +358,7 @@ pub struct Snapshot {
     pub interface_drop_deltas: Option<Vec<NetworkDropDelta>>,
     pub failed_units: Vec<String>,
     pub system_units_checked: bool,
-    /// At most four system-manager unit snapshots attributed to historical failures.
+    /// At most four bounded system/user-manager snapshots for historical failures.
     /// Empty means none collected, not that every historical failure recovered.
     pub service_statuses: Vec<ServiceStatus>,
     /// None when the user's systemd manager is inaccessible.
