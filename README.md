@@ -60,6 +60,21 @@ whydown gui
 APT resolves dependencies; CLI/TUI need no Qt, while the GUI uses `python3` and `python3-pyqt6`.
 See the [package guide](docs/PACKAGING.md); Manjaro/CachyOS/Arch use [AUR recipes](packaging/aur/README.md).
 
+### AUR — Arch Linux, Manjaro and CachyOS
+
+```bash
+sudo pacman -S --needed python python-pyqt6  # GUI dependencies
+yay -S whydown-bin  # or: paru -S whydown-bin (prebuilt)
+# To compile from source instead: yay -S whydown
+whydown --version
+whydown gui
+```
+
+If AUR says `target not found`, clone the [WhyDown repository](https://github.com/hamdyaea/WhyDown)
+and run `makepkg -si` in `packaging/aur/whydown-bin/` (requires `base-devel`
+and `git`). Install only one variant. Check `type -a whydown` if an old
+`~/.local/bin/whydown` shadows the package. [Details](packaging/aur/README.md).
+
 ### GUI prerequisites (Qt 6)
 
 The CLI and terminal menu do not require Python or Qt. For the desktop GUI,
@@ -116,31 +131,19 @@ Create the history directory first. See [Nagios setup](docs/NAGIOS.md).
 
 ## Update WhyDown
 
-From an existing Git checkout:
-
 ```bash
-cd ~/WhyDown
-git pull --ff-only
+cd ~/WhyDown && git pull --ff-only
 sh scripts/install.sh --desktop
 ~/.local/bin/whydown --version
 ```
 
-For a terminal-only machine, omit `--desktop`. The installer downloads
-published binaries and requires network access **only to install/update**;
-diagnostics never contact an external server.
+Omit `--desktop` on headless systems. Only installation uses the network.
 
 ## What it examines
 
-WhyDown can highlight historical service failures, network link/DHCP/DNS
-signals, default-route issues, low disk space, filesystem and memory warnings,
-resource pressure and incomplete Debian package states. It separates a
-**historical observation** from a current snapshot where evidence is available.
-
-**Limitations:** findings are investigation hints, not proof of a root cause;
-missing journal access does not mean a healthy system; `active/running` does
-not guarantee application readiness. WhyDown does not repair problems,
-restart services or send logs anywhere. Check the suggested commands before
-acting on them.
+WhyDown identifies historic service failures, network/DNS and disk problems,
+resource pressure, and package errors. It distinguishes past events from
+current snapshots but does not prove a root cause, repair systems or send logs.
 
 ## Documentation
 
@@ -153,17 +156,14 @@ acting on them.
 
 ## Develop from source
 
-Requires the Rust toolchain. This project uses **no third-party Rust crates**.
+Rust toolchain required; no third-party Rust crates:
 
 ```bash
-git clone https://github.com/hamdyaea/WhyDown.git
-cd WhyDown
-cargo test --locked
-cargo build --release --locked
+git clone https://github.com/hamdyaea/WhyDown.git && cd WhyDown
+cargo test --locked && cargo build --release --locked
 ./target/release/whydown --version
 ```
 
-Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Do not
-publish unsanitized diagnostic logs in issues.
+See [CONTRIBUTING.md](CONTRIBUTING.md); never publish sensitive logs.
 
 **License:** [GPL-3.0-only](LICENSE). © 2026 Hamdy Abou El Anein and contributors.
