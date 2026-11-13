@@ -82,7 +82,7 @@ rejects `--format`, `--output`, `--overwrite`, `--exit-on-warning`,
 
 - The UI never modifies services, files, packages or network configuration.
 - Report strings are sanitized of terminal control characters before display.
-- It uses classified evidence, not raw journal message bodies.
+- It uses classified evidence by default. Add `--journal-messages` to show up to three bounded original messages per classified event; these may contain secrets.
 - Current `active/running` systemd state is not proof of application readiness.
 - Wi-Fi association does not establish usable Internet connectivity.
 - Historical events are observations, not proof of current outages.
