@@ -482,6 +482,13 @@ pub fn json(report: &Report) -> String {
             ("label", js(event.kind.label())),
             ("subject", opt_str(&event.subject)),
             ("source", opt_str(&event.source)),
+            ("diagnostic_hint", match s.event_contexts.iter().find(|hint|
+                hint.timestamp == event.timestamp && hint.kind == event.kind &&
+                hint.subject == event.subject
+            ) {
+                Some(hint) => js(hint.signal.clone()),
+                None => JsonValue::Null,
+            }),
         ])).collect())),
         ("collector_timings", arr(s.collector_timings.iter().map(|timing| object(vec![
             ("name", js(timing.name)),

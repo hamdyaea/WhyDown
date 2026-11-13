@@ -225,6 +225,263 @@ def finding_details(f):
     lines.extend(["", "Observations are not proof of root cause or application readiness."])
     return "\n".join(lines)
 
+
+# Matching uses rule IDs rather than keywords from potentially sensitive logs.
+# Snapshot-only rules deliberately have no historical events attached.
+FINDING_EVENT_KINDS = {
+    "LINK_DISCONNECTS": ("link_disconnected",),
+    "DHCP_FAILURES": ("dhcp_problem",),
+    "DNS_FAILURES": ("dns_failure",),
+    "NETWORK_UNREACHABLE": ("network_unreachable",),
+    "LINK_BEFORE_DNS": ("link_disconnected", "dns_failure"),
+    "DHCP_BEFORE_DNS": ("dhcp_problem", "dns_failure"),
+    "WIFI_LOCAL_ROAM_OBSERVED": ("wifi_roam_start", "wifi_associated"),
+    "SERVICE_FAILURE_LOGS": ("service_failure",),
+    "SERVICE_RESTART_OBSERVED": ("service_restart_scheduled", "service_failure"),
+    "OOM_EVENTS": ("out_of_memory",),
+    "STORAGE_ERRORS": ("storage_error",),
+    "FD_EXHAUSTION_LOGS": ("file_handle_exhaustion",),
+    "USB_DISCONNECT_BURST": ("usb_disconnect",),
+    "USB_TRANSPORT_STATUS": ("usb_transport_error",),
+}
+
+
+def related_events(report, finding):
+    rule = finding.get("id")
+    kinds = FINDING_EVENT_KINDS.get(rule, ())
+    events = [event for event in report.get("timeline", [])
+              if isinstance(event, dict) and event.get("kind") in kinds]
+    # These rules describe a particular unit/interface or a particular
+    # correlated pair. Do not display unrelated events of the same kind.
+    evidence = [str(v) for v in (finding.get("evidence") or [])]
+    if rule in ("SERVICE_RESTART_OBSERVED", "WIFI_LOCAL_ROAM_OBSERVED") and evidence:
+        target = evidence[0].split(":", 1)[0].strip()
+        if re.fullmatch(r"[a-zA-Z0-9_.@-]{1,64}", target):
+            events = [e for e in events if e.get("subject") == target]
+    elif rule in ("LINK_BEFORE_DNS", "DHCP_BEFORE_DNS") and len(evidence) >= 2:
+        # The Rust rule stores precisely the paired timestamps in evidence.
+        times = set(re.findall(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+                               " ".join(evidence[:2])))
+        if times:
+            events = [e for e in events if e.get("timestamp") in times]
+    return events
+
+
+def affected_targets(report, finding, events=None):
+    events = related_events(report, finding) if events is None else events
+    targets = sorted({str(e["subject"]) for e in events if e.get("subject")})
+    system = report.get("system") or {}
+    if finding.get("id") == "FAILED_SYSTEMD_UNITS":
+        targets = [str(x) for x in system.get("failed_units", [])]
+    elif finding.get("id") == "FAILED_USER_SYSTEMD_UNITS":
+        targets = [str(x) for x in system.get("failed_user_units") or []]
+    if len(targets) > 3:
+        return ", ".join(targets[:3]) + f" (+{len(targets)-3})"
+    return ", ".join(targets) if targets else "Not identified"
+
+
+def overview_row(report, finding):
+    events = related_events(report, finding)
+    first = events[0].get("timestamp", "—") if events else (
+        "Current state" if finding.get("scope") == "current_snapshot" else "—")
+    summary = (finding.get("evidence") or [finding.get("explanation", "")])[0]
+    signal = next((str(e["diagnostic_hint"]) for e in events
+                   if e.get("diagnostic_hint")), None)
+    if signal:
+        summary = str(summary) + "  |  Indicator: " + signal
+    return {
+        "severity": str(finding.get("severity", "?")).upper(),
+        "title": str(finding.get("title", "Finding")),
+        "affected": affected_targets(report, finding, events),
+        "observed": str(first),
+        "events": str(len(events)) if events else "—",
+        "preview": str(summary),
+    }
+
+
+
+def targeted_readonly_commands(report, finding, events):
+    """Suggest shell-safe, read-only commands for identified local subjects."""
+    rule = finding.get("id", "")
+    sysinfo = report.get("system") or {}
+    targets = {str(e.get("subject")) for e in events if e.get("subject")}
+    if rule == "FAILED_SYSTEMD_UNITS":
+        targets.update(str(v) for v in (sysinfo.get("failed_units") or []))
+    if rule == "FAILED_USER_SYSTEMD_UNITS":
+        targets.update(str(v) for v in (sysinfo.get("failed_user_units") or []))
+    # Never echo an unsafe identifier into a copyable shell command.
+    safe = sorted(t for t in targets if re.fullmatch(r"[a-zA-Z0-9_.@-]{1,64}", t))
+    commands = []
+    if rule in ("LINK_DISCONNECTS", "DHCP_FAILURES", "DNS_FAILURES",
+                "NETWORK_UNREACHABLE", "WIFI_LOCAL_ROAM_OBSERVED",
+                "LINK_BEFORE_DNS", "DHCP_BEFORE_DNS",
+                "RECENT_INTERFACE_DROPS", "IFACE_ERROR_COUNTERS"):
+        for iface in safe[:8]:
+            if not re.fullmatch(r"(wlan|wlp|wlx|eth|enp|ens|eno|enx|wwan|wg)[a-zA-Z0-9_.-]{0,58}", iface):
+                continue
+            commands.append(f"ip -s link show dev {iface}")
+            commands.append(f"nmcli device show {iface}    # if NetworkManager is installed")
+        commands.append("journalctl -u NetworkManager --no-pager -n 100")
+        commands.append("journalctl -u systemd-networkd --no-pager -n 100")
+    elif rule in ("FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
+                  "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED"):
+        user = rule == "FAILED_USER_SYSTEMD_UNITS"
+        flag = "--user " if user else ""
+        commands.append(f"systemctl {flag}--failed --no-pager")
+        for unit in safe[:8]:
+            if not unit.endswith((".service", ".socket", ".target", ".mount",
+                                  ".timer", ".path")):
+                continue
+            commands.append(f"systemctl {flag}status {unit} --no-pager")
+            commands.append(f"journalctl {'--user ' if user else ''}-u {unit} --no-pager -n 100")
+    return commands[:20]
+
+
+def detailed_incident(report, finding):
+    """Human-readable dossier from actual collected data, never inferred causes.
+
+    All entries are already privacy-filtered by the Rust collector. A timeline
+    sample is not an exhaustive journal transcript, and current snapshots are
+    not evidence that a historical error persists.
+    """
+    events = related_events(report, finding)
+    row = overview_row(report, finding)
+    sysinfo = report.get("system") or {}
+    lines = [
+        str(finding.get("title", "Finding")), "",
+        "INCIDENT IDENTIFICATION",
+        f"Rule: {finding.get('id', 'unknown')}",
+        f"Severity: {row['severity']}",
+        f"Confidence: {finding.get('confidence', 'unknown')}",
+        f"Scope: {finding.get('scope', 'unknown')}",
+        f"Affected: {row['affected']}",
+        f"First matching event in retained timeline: {row['observed']}",
+        f"Matching events in retained timeline: {len(events)}",
+    ]
+    if events:
+        lines.append(f"Last matching event in retained timeline: {events[-1].get('timestamp', '?')}")
+    lines.extend(["", "WHAT WHYDOWN OBSERVED",
+                  str(finding.get("explanation", "")), "",
+                  "CLASSIFIED JOURNAL EVENTS (time / source / affected / safe diagnostic code)"])
+    if events:
+        for i, event in enumerate(events[-80:], 1):
+            lines.append(
+                f"{i:02d}  {event.get('timestamp', '?')}  "
+                f"{event.get('kind', '?')}  source={event.get('source') or 'unknown'}  "
+                f"subject={event.get('subject') or 'unknown'}")
+            signal = event.get("diagnostic_hint")
+            if signal:
+                lines.append(f"    Indicator: {signal}")
+                if "PREV_AUTH_NOT_VALID" in signal:
+                    lines.append("    Interpretation: 802.11 reason 2 — previous authentication not valid; underlying cause is not proven.")
+                elif "DISASSOC_DUE_TO_INACTIVITY" in signal:
+                    lines.append("    Interpretation: 802.11 reason 4 — station disconnected due to inactivity; underlying cause is not proven.")
+                elif "exit_status=1/FAILURE" in signal:
+                    lines.append("    Interpretation: nonzero process exit observed; current service state must be checked separately.")
+        if len(events) > 80:
+            lines.append(f"Only the newest 80 matching timeline entries are displayed here (of {len(events)} retained).")
+    else:
+        lines.append("No event of this class is present in the retained timeline; "
+                     "this rule may be snapshot-only or older events may be outside the timeline.")
+    lines.extend(["", "SPECIFIC COLLECTED EVIDENCE"])
+    for evidence in finding.get("evidence") or []:
+        lines.append(" • " + str(evidence))
+    if not finding.get("evidence"):
+        lines.append(" No additional evidence recorded")
+
+    if finding.get("id") in (
+        "LINK_DISCONNECTS", "DHCP_FAILURES", "DNS_FAILURES",
+        "NETWORK_UNREACHABLE", "LINK_BEFORE_DNS", "DHCP_BEFORE_DNS",
+        "WIFI_LOCAL_ROAM_OBSERVED", "RECENT_INTERFACE_DROPS", "IFACE_ERROR_COUNTERS",
+        "ROUTE_MISSING", "IPV4_ROUTE_MISSING", "DNS_UNCONFIGURED", "DNS_STUB_INACTIVE",
+    ):
+        lines.extend(["", "CURRENT NETWORK SNAPSHOT (NOT VERIFIED AT INCIDENT TIME)"])
+        lines.extend([
+            f"IPv4 default route: {sysinfo.get('ipv4_default_route', 'unverified')}",
+            f"IPv6 default route: {sysinfo.get('ipv6_default_route', 'unverified')}",
+            f"Configured DNS nameserver count: {sysinfo.get('dns_nameservers', 'unverified')}",
+            f"systemd-resolved active: {sysinfo.get('resolved_active', 'unverified')}",
+        ])
+        known = {e.get("subject") for e in events if e.get("subject")}
+        for interface in sysinfo.get("interfaces") or []:
+            if not known or interface.get("name") in known:
+                lines.append(
+                    f" • {interface.get('name', '?')}: operstate={interface.get('operstate', '?')}, "
+                    f"rx_errors={interface.get('rx_errors', '?')}, "
+                    f"tx_errors={interface.get('tx_errors', '?')}, "
+                    f"rx_dropped={interface.get('rx_dropped', '?')}, "
+                    f"tx_dropped={interface.get('tx_dropped', '?')}")
+        for incident in (report.get("network_incidents") or [])[-12:]:
+            if known and incident.get("subject") not in known:
+                continue
+            lines.append(
+                f" • Incident cluster: {incident.get('subject') or 'unknown interface'} "
+                f"{incident.get('start', '?')} → {incident.get('end', '?')}: "
+                f"link={incident.get('link_events', 0)}, dhcp={incident.get('dhcp_events', 0)}, "
+                f"dns={incident.get('dns_events', 0)}, unreachable={incident.get('unreachable_events', 0)}")
+    elif finding.get("id") in (
+        "FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
+        "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED",
+    ):
+        lines.extend(["", "CURRENT SYSTEMD STATE (SEPARATE FROM HISTORICAL ERRORS)"])
+        if sysinfo.get("system_units_checked"):
+            failed = sysinfo.get("failed_units") or []
+            lines.append("Currently failed system units: " + (", ".join(map(str, failed)) or "none"))
+        else:
+            lines.append("Current system-unit query: unavailable")
+        user_failed = sysinfo.get("failed_user_units")
+        lines.append("Currently failed user units: "
+                     + (", ".join(map(str, user_failed)) if user_failed is not None else "not verified"))
+        for state in sysinfo.get("service_statuses") or []:
+            lines.append(
+                f" • {state.get('unit', '?')}: "
+                f"load={state.get('load_state', '?')}, "
+                f"active={state.get('active_state', '?')}, "
+                f"sub={state.get('sub_state', '?')}, "
+                f"result={state.get('result', '?')}, "
+                f"restarts={state.get('n_restarts', 'unknown')}")
+        for group in (report.get("service_event_windows") or [])[-12:]:
+            lines.append(
+                f" • Historical failure cluster: {group.get('start', '?')} → {group.get('end', '?')}, "
+                f"messages={group.get('entry_count', '?')}, "
+                f"units={', '.join(group.get('units') or []) or 'unattributed'}")
+
+    lines.extend(["", "TARGETED READ-ONLY COMMANDS (copy and review before running)"])
+    commands = targeted_readonly_commands(report, finding, events)
+    if commands:
+        for command in commands:
+            lines.append(" $ " + command)
+    else:
+        lines.append(" No target-specific command available from verified identifiers.")
+    lines.extend(["", "SUGGESTED READ-ONLY CHECKS"])
+    for check in finding.get("checks") or []:
+        lines.append(" • " + str(check))
+    if not finding.get("checks"):
+        lines.append(" No specific check supplied")
+    lines.extend(["", "CONFIDENCE AND LIMITATIONS",
+                  "This is a local snapshot plus classified historical events, not a confirmed root cause.",
+                  "Current status may have changed since a historical incident.",
+                  "No raw journal messages or credentials are retained in this report.",
+                  "The timeline contains at most 300 recent classified events, not necessarily all incidents."])
+    if report.get("journal_truncated"):
+        lines.append("PARTIAL JOURNAL: older records were excluded by the event limit.")
+    if not report.get("journal_checked"):
+        lines.append("UNVERIFIED JOURNAL: journalctl was inaccessible or unavailable.")
+    return "\n".join(lines)
+
+
+def event_dossier(event):
+    lines = ["CLASSIFIED JOURNAL EVENT", "",
+             f"Time (UTC): {event.get('timestamp', 'unknown')}",
+             f"Category: {event.get('label', event.get('kind', 'unknown'))}",
+             f"Source: {event.get('source') or 'not identified'}",
+             f"Affected subject: {event.get('subject') or 'not identified'}",
+             f"Safe diagnostic indicator: {event.get('diagnostic_hint') or 'not available'}",
+             "", "The journal message itself was not retained for privacy.",
+             "A journal event does not prove that the fault is still present."]
+    return "\n".join(lines)
+
+
 def coverage_details(r):
     sysinfo = r.get("system") or {}
     lines = ["COLLECTION COVERAGE AND LIMITATIONS", "",
@@ -359,7 +616,7 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         nav.addSpacing(46)
         nav.addWidget(self.label("WORKSPACE", "SideCaption"))
         self.navbuttons = []
-        for n, name in enumerate(("◉  Findings", "◷  Timeline", "▤  Coverage")):
+        for n, name in enumerate(("◉  Overview", "▣  Incident details", "◷  Timeline", "▤  Coverage")):
             btn = QtWidgets.QPushButton(name)
             btn.setObjectName("Nav")
             btn.setCheckable(True)
@@ -453,9 +710,9 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
             strip.addWidget(card, 1)
         main.addLayout(strip)
         summary = QtWidgets.QHBoxLayout()
-        summary.addWidget(self.label("02   Results & evidence", "CardTitle"))
+        summary.addWidget(self.label("02   Incident overview", "CardTitle"))
         summary.addStretch()
-        summary.addWidget(self.label("Drag to select text, then Ctrl+C or Copy selection", "Muted"))
+        summary.addWidget(self.label("Select an alert to preview · Double-click for full details", "Muted"))
         main.addLayout(summary)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -465,18 +722,38 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         finds = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(finds)
         layout.setContentsMargins(5, 5, 5, 5)
-        split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.findings = QtWidgets.QTreeWidget()
-        self.findings.setHeaderLabels(["Finding", "Severity"])
+        self.findings.setHeaderLabels(
+            ["Severity", "Incident / observation", "Affected", "First event (UTC)", "Events"])
         self.findings.setRootIsDecorated(False)
         self.findings.setAlternatingRowColors(True)
+        self.findings.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.findings.setMinimumHeight(190)
         self.findings.currentItemChanged.connect(self._finding_changed)
-        split.addWidget(self.findings)
-        self.detail = self.readonly_text("Start an analysis to review the evidence.")
-        split.addWidget(self.detail)
-        split.setSizes([280, 630])
-        layout.addWidget(split)
-        self.tabs.addTab(finds, "Findings & evidence")
+        self.findings.itemDoubleClicked.connect(self.open_finding)
+        self.findings.setToolTip("Double-click an incident for its evidence, timestamps and affected units")
+        layout.addWidget(self.findings, 2)
+        layout.addWidget(self.label("SELECTED INCIDENT PREVIEW  ·  Double-click the row for all details",
+                                    "Muted"))
+        self.overview_preview = self.readonly_text("Run diagnostics to view the incident list.")
+        self.overview_preview.setMaximumHeight(125)
+        layout.addWidget(self.overview_preview, 1)
+        self.tabs.addTab(finds, "Incident overview")
+
+        details_page = QtWidgets.QWidget()
+        details_layout = QtWidgets.QVBoxLayout(details_page)
+        details_layout.setContentsMargins(8, 8, 8, 8)
+        top = QtWidgets.QHBoxLayout()
+        self.back_button = QtWidgets.QPushButton("← Back to overview")
+        self.back_button.setObjectName("Secondary")
+        self.back_button.clicked.connect(lambda: self.tabs.setCurrentIndex(0))
+        top.addWidget(self.back_button)
+        top.addStretch()
+        top.addWidget(self.label("Read-only evidence · Ctrl+C to copy", "Muted"))
+        details_layout.addLayout(top)
+        self.detail = self.readonly_text("Double-click an alert in the overview to see its full dossier.")
+        details_layout.addWidget(self.detail)
+        self.tabs.addTab(details_page, "Incident details")
 
         timeline = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(timeline)
@@ -486,6 +763,7 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.events.setRootIsDecorated(False)
         self.events.setAlternatingRowColors(True)
         self.events.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.events.itemDoubleClicked.connect(self.open_event)
         lv.addWidget(self.events)
         self.tabs.addTab(timeline, "Event timeline")
 
@@ -619,43 +897,82 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.metrics["info"].setText(str(summary.get("info_count", 0)))
         self.metrics["events"].setText(str(r.get("journal_entries_examined", 0)))
         self.findings.clear()
-        for i, finding in enumerate(r["findings"]):
+        for i, finding in sorted(
+                enumerate(r["findings"]),
+                key=lambda indexed: (indexed[1].get("severity") != "warning", indexed[0])):
+            info = overview_row(r, finding)
             item = QtWidgets.QTreeWidgetItem([
-                str(finding.get("title", "Finding")),
-                str(finding.get("severity", ""))])
+                info["severity"], info["title"], info["affected"],
+                info["observed"], info["events"]])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, i)
+            item.setToolTip(1, info["title"] + "\n" + info["preview"])
             if finding.get("severity") == "warning":
-                item.setForeground(1, QtGui.QBrush(QtGui.QColor("#b85f28")))
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor("#e98d4f")))
             self.findings.addTopLevelItem(item)
+        for column in range(5):
+            self.findings.resizeColumnToContents(column)
+        self.findings.setColumnWidth(1, min(440, max(240, self.findings.columnWidth(1))))
+        self.detail.setPlainText(
+            "Double-click an incident in the overview for its detailed dossier.")
         if r["findings"]:
             self.findings.setCurrentItem(self.findings.topLevelItem(0))
         else:
-            self.detail.setPlainText("No classified findings. Not a health guarantee.")
+            self.overview_preview.setPlainText("No classified findings. Not a health guarantee.")
         self.events.clear()
         for e in reversed(r["timeline"][-300:]):
             item = QtWidgets.QTreeWidgetItem([
                 str(e.get("timestamp", "")),
                 str(e.get("label", e.get("kind", ""))),
                 str(e.get("subject") or ""), str(e.get("source") or "")])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, e)
             self.events.addTopLevelItem(item)
         for i in range(4): self.events.resizeColumnToContents(i)
         self.coverage.setPlainText(coverage_details(r))
         self.tabs.setCurrentIndex(0)
         self.save_button.setEnabled(True)
         suffix = " · Partial journal window" if r.get("journal_truncated") else ""
-        self.status.setText("Analysis complete. Select and copy any evidence passage." + suffix)
+        self.status.setText("Analysis complete. Select an alert, then double-click for the full incident dossier." + suffix)
 
     def _finding_changed(self, current, previous):
         del previous
-        if current is None or self.report is None: return
+        if current is None or self.report is None:
+            return
         i = current.data(0, QtCore.Qt.ItemDataRole.UserRole)
-        if isinstance(i, int) and i < len(self.report["findings"]):
-            self.detail.setPlainText(finding_details(self.report["findings"][i]))
+        if isinstance(i, int) and 0 <= i < len(self.report["findings"]):
+            finding = self.report["findings"][i]
+            info = overview_row(self.report, finding)
+            preview = (
+                f"{info['severity']}  •  {info['title']}\n"
+                f"Affected: {info['affected']}  |  First event: {info['observed']}\n"
+                f"{info['preview']}\n"
+                "Double-click this row to inspect matching event timestamps, "
+                "safe diagnostic codes, current system state and suggested checks.")
+            self.overview_preview.setPlainText(preview)
+
+    def open_finding(self, item, _column=0):
+        if item is None or self.report is None:
+            return
+        index = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not isinstance(index, int) or not 0 <= index < len(self.report["findings"]):
+            return
+        self.detail.setPlainText(detailed_incident(self.report, self.report["findings"][index]))
+        self.detail.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+        self.tabs.setCurrentIndex(1)
+
+    def open_event(self, item, _column=0):
+        if item is None or self.report is None:
+            return
+        event = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not isinstance(event, dict):
+            return
+        self.detail.setPlainText(event_dossier(event))
+        self.detail.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+        self.tabs.setCurrentIndex(1)
 
     def copy_selection(self):
         index = self.tabs.currentIndex()
-        if index != 1:
-            editor = self.detail if index == 0 else self.coverage
+        if index != 2:
+            editor = {0: self.overview_preview, 1: self.detail, 3: self.coverage}[index]
             selected = editor.textCursor().selectedText().replace("\u2029", "\n")
         else:
             selected = "\n".join(

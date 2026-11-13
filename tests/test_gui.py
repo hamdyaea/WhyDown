@@ -112,6 +112,106 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("Journal window partial: True", coverage)
         self.assertIn("connectivity", coverage)
 
+    def test_detailed_incident_has_specific_wifi_and_systemd_evidence(self):
+        data = self.fixture()
+        data["journal_truncated"] = False
+        data["system"].update({
+            "interfaces": [{"name": "wlan0", "operstate": "up", "rx_errors": 0,
+                            "tx_errors": 0, "rx_dropped": 2, "tx_dropped": 0}],
+            "ipv4_default_route": True, "ipv6_default_route": False,
+            "dns_nameservers": 1, "resolved_active": True,
+            "failed_units": [],
+        })
+        wifi = {"id": "LINK_DISCONNECTS", "title": "Network link interruption on wlan0",
+                "severity": "warning", "scope": "historical_journal",
+                "confidence": "observed", "explanation": "Carrier loss was observed",
+                "evidence": ["wlan0 affected"], "checks": ["ip -s link show dev wlan0"]}
+        svc = {"id": "SERVICE_FAILURE_LOGS", "title": "Historical failure: sshd.service",
+               "severity": "warning", "scope": "historical_journal",
+               "confidence": "observed", "explanation": "Process failed",
+               "evidence": ["sshd.service"], "checks": ["systemctl status sshd.service"]}
+        data["findings"] = [wifi, svc]
+        data["timeline"] = [
+            {"timestamp": "2026-11-12T15:01:42Z", "kind": "link_disconnected",
+             "subject": "wlan0", "source": "NetworkManager",
+             "diagnostic_hint": "reason=2; transition=activated_to_disconnected"},
+            {"timestamp": "2026-11-12T15:02:02Z", "kind": "service_failure",
+             "subject": "sshd.service", "source": "systemd",
+             "diagnostic_hint": "exit_status=1/FAILURE"},
+        ]
+        self.assertEqual(len(gui.related_events(data, wifi)), 1)
+        row = gui.overview_row(data, wifi)
+        self.assertEqual(row["affected"], "wlan0")
+        self.assertEqual(row["events"], "1")
+        wifi_dossier = gui.detailed_incident(data, wifi)
+        for term in ("wlan0", "NetworkManager", "2026-11-12T15:01:42Z",
+                     "reason=2", "operstate=up", "ip -s link show dev wlan0",
+                     "not a confirmed root cause"):
+            self.assertIn(term, wifi_dossier)
+        self.assertNotIn("exit_status=1/FAILURE", wifi_dossier)
+        self.assertIn("ip -s link show dev wlan0", wifi_dossier)
+        self.assertIn("nmcli device show wlan0", wifi_dossier)
+        svc_dossier = gui.detailed_incident(data, svc)
+        self.assertIn("sshd.service", svc_dossier)
+        self.assertIn("exit_status=1/FAILURE", svc_dossier)
+        self.assertIn("CURRENT SYSTEMD STATE", svc_dossier)
+        self.assertNotIn("reason=2", svc_dossier)
+        self.assertIn("systemctl status sshd.service --no-pager", svc_dossier)
+        self.assertIn("journalctl -u sshd.service --no-pager -n 100", svc_dossier)
+        forged = [dict(data["timeline"][0], subject="wlan0;rm -rf /")]
+        self.assertFalse(any("rm" in cmd for cmd in
+                             gui.targeted_readonly_commands(data, wifi, forged)))
+        standalone = gui.detailed_incident(
+            data, {"id": "FAILED_SYSTEMD_UNITS", "title": "Current units failed",
+                   "severity": "warning", "scope": "current_snapshot",
+                   "explanation": "Failure observed", "evidence": [], "checks": []})
+        self.assertIn("Current state", standalone)
+        self.assertIn("No event of this class", standalone)
+        self.assertIn("No specific check supplied", standalone)
+
+    def test_unit_scoped_restart_and_temporal_correlation_do_not_mix_events(self):
+        data = self.fixture()
+        data["timeline"] = [
+            {"timestamp": "2026-11-12T15:00:00Z", "kind": "service_restart_scheduled",
+             "subject": "alpha.service", "source": "systemd"},
+            {"timestamp": "2026-11-12T15:00:01Z", "kind": "service_restart_scheduled",
+             "subject": "beta.service", "source": "systemd"},
+            {"timestamp": "2026-11-12T15:00:02Z", "kind": "link_disconnected",
+             "subject": "wlan0", "source": "kernel"},
+            {"timestamp": "2026-11-12T15:00:03Z", "kind": "dns_failure",
+             "subject": None, "source": "resolved"},
+            {"timestamp": "2026-11-12T16:00:00Z", "kind": "dns_failure",
+             "subject": None, "source": "resolved"},
+        ]
+        restart = {
+            "id": "SERVICE_RESTART_OBSERVED",
+            "evidence": ["beta.service: restart scheduled at 2026-11-12T15:00:01Z"],
+        }
+        self.assertEqual(
+            [e["subject"] for e in gui.related_events(data, restart)],
+            ["beta.service"])
+        pair = {
+            "id": "LINK_BEFORE_DNS",
+            "evidence": ["Link event: 2026-11-12T15:00:02Z",
+                         "DNS event: 2026-11-12T15:00:03Z (1 s later)"],
+        }
+        self.assertEqual(
+            [e["timestamp"] for e in gui.related_events(data, pair)],
+            ["2026-11-12T15:00:02Z", "2026-11-12T15:00:03Z"])
+
+    def test_dossier_events_are_bounded_and_not_claimed_complete(self):
+        data = self.fixture()
+        finding = {"id": "DNS_FAILURES", "severity": "warning", "title": "DNS", "evidence": []}
+        data["timeline"] = [
+            {"timestamp": "2026-11-12T15:00:00Z", "kind": "dns_failure",
+             "subject": None, "source": "systemd-resolved", "diagnostic_hint": "dns_reply=SERVFAIL"}
+            for _ in range(100)
+        ]
+        dossier = gui.detailed_incident(data, finding)
+        self.assertIn("Only the newest 80", dossier)
+        self.assertIn("PARTIAL JOURNAL", dossier)
+        self.assertIn("matching events in retained timeline: 100", dossier.lower())
+
     def test_report_validation_does_not_guess(self):
         for bad in ({}, {"schema_version": 4}, {"schema_version": 2, "system": {}}):
             with self.subTest(data=bad):

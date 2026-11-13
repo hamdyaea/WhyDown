@@ -1,6 +1,6 @@
 //! Read-only, local collectors. No shell invocation, network probes, or mutations.
 
-use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventKind, Focus, InterfaceStats, NetworkDropDelta, ServiceStatus, Snapshot};
+use crate::model::{CollectorTiming, DirectoryUsage, DiskBreakdown, DiskUsage, DpkgProblem, Event, EventContext, EventKind, Focus, InterfaceStats, NetworkDropDelta, ServiceStatus, Snapshot};
 use crate::progress::{Progress, ProgressMode};
 use std::collections::HashSet;
 use std::fs;
@@ -243,7 +243,7 @@ pub fn collect_with_options(
             if examined == 0 {
                 snapshot.notes.push("No journal entries were returned; logging may be unavailable, inaccessible or simply quiet".into());
             }
-            snapshot.events = parse_journal(&sample);
+            (snapshot.events, snapshot.event_contexts) = parse_journal_with_context(&sample);
         }
         Ok((false, _)) => snapshot.notes.push(
             "Journal collection failed or access is restricted; verify journalctl permissions and available boots".into(),
@@ -766,11 +766,125 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
     None
 }
 
+/// Extract only explicit diagnostic codes or canonical status transitions.
+///
+/// Never retain arbitrary message text: journal records may contain Wi-Fi
+/// BSSIDs, hostnames, URLs, client names, credentials and command arguments.
+/// Accepted indicators contain only short ASCII state/reason/status codes.
+fn diagnostic_signal(body: &str, kind: EventKind) -> Option<String> {
+    fn token(s: &str) -> Option<String> {
+        let candidate = s.trim_start_matches(['\'', '"', '('])
+            .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/' | '=' | '.')))
+            .next()?.trim_end_matches(['.', '/']);
+        if candidate.is_empty() || candidate.len() > 48 ||
+            !candidate.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-./=".contains(&c)) ||
+            candidate.contains("..") {
+            return None;
+        }
+        Some(candidate.to_string())
+    }
+    let lower = body.to_ascii_lowercase();
+    let mut parts: Vec<String> = Vec::new();
+    for (marker, label) in [
+        ("status=", "exit_status"),
+        ("reason=", "reason"),
+        ("reason: ", "reason"),
+        ("failed with result ", "systemd_result"),
+        ("result=", "result"),
+        ("errno=", "errno"),
+    ] {
+        if let Some(pos) = lower.find(marker) {
+            let suffix = &body[pos + marker.len()..];
+            if let Some(value) = token(suffix) {
+                // Whitelist numeric codes and documented status names only.
+                // Arbitrary alphanumeric values can be secrets, hostnames or
+                // SSIDs; never forward them even under a field called "reason".
+                let digits = |v: &str, max: usize| {
+                    !v.is_empty() && v.len() <= max && v.bytes().all(|c| c.is_ascii_digit())
+                };
+                let normalized = match label {
+                    "exit_status" if matches!(kind, EventKind::ServiceFailure) => {
+                        let (number, suffix) = value.split_once('/').unwrap_or((&value, ""));
+                        if !digits(number, 5) { None }
+                        else if matches!(suffix.to_ascii_uppercase().as_str(),
+                            "FAILURE" | "SUCCESS" | "TERM" | "KILL" | "ABRT"
+                            | "SEGV" | "BUS" | "ILL" | "TRAP") {
+                            Some(format!("{number}/{suffix}"))
+                        } else { Some(number.to_string()) }
+                    }
+                    "reason" if matches!(kind, EventKind::LinkDown
+                            | EventKind::DhcpProblem | EventKind::WifiRoamStart) => {
+                        let (number, suffix) = value.split_once('=').unwrap_or((&value, ""));
+                        if digits(number, 3) {
+                            if matches!(suffix.to_ascii_uppercase().as_str(),
+                                "PREV_AUTH_NOT_VALID" | "DISASSOC_DUE_TO_INACTIVITY"
+                                | "DEAUTH_LEAVING" | "CLASS2_FRAME_FROM_NONAUTH_STA"
+                                | "CLASS3_FRAME_FROM_NONASSOC_STA" | "DISASSOC_AP_BUSY"
+                                | "MIC_FAILURE" | "4WAY_HANDSHAKE_TIMEOUT"
+                                | "GROUP_KEY_UPDATE_TIMEOUT") {
+                                Some(format!("{number}={suffix}"))
+                            } else { Some(number.to_string()) }
+                        } else if matches!(value.to_ascii_lowercase().as_str(),
+                            "carrier-changed" | "ssid-not-found" | "supplicant-disconnect"
+                            | "no-secrets" | "dhcp-failed" | "ip-config-unavailable"
+                            | "supplicant-timeout" | "connection-removed"
+                            | "user-requested" | "deauth" | "disassoc") {
+                            Some(value)
+                        } else { None }
+                    }
+                    "systemd_result" | "result"
+                        if matches!(kind, EventKind::ServiceFailure |
+                            EventKind::ServiceRestartScheduled) &&
+                            matches!(value.to_ascii_lowercase().as_str(),
+                                "exit-code" | "signal" | "core-dump" | "timeout"
+                                | "start-limit-hit" | "resources" | "protocol"
+                                | "watchdog" | "oom-kill" | "success") => Some(value),
+                    "errno" if digits(&value, 4) => Some(value),
+                    _ => None,
+                };
+                if let Some(value) = normalized {
+                    parts.push(format!("{label}={value}"));
+                }
+            }
+        }
+    }
+    // Canonical patterns are useful and contain no journal arguments.
+    if matches!(kind, EventKind::LinkDown) &&
+        lower.contains("activated -> disconnected") {
+        parts.push("transition=activated_to_disconnected".into());
+    } else if matches!(kind, EventKind::LinkDown) &&
+        lower.contains("ctrl-event-disconnected") {
+        parts.push("transition=wpa_disconnected".into());
+    }
+    if matches!(kind, EventKind::DhcpProblem) &&
+        (lower.contains("timed out") || lower.contains("timeout")) {
+        parts.push("dhcp_timeout=reported".into());
+    }
+    if matches!(kind, EventKind::DnsProblem) && lower.contains("servfail") {
+        parts.push("dns_reply=SERVFAIL".into());
+    }
+    if matches!(kind, EventKind::ServiceFailure) &&
+        lower.contains("start request repeated too quickly") {
+        parts.push("start_limit=hit".into());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        // Whitelisted markers only, capped for bounded JSON and clipboard use.
+        Some(parts.into_iter().take(4).collect::<Vec<_>>().join("; ").chars().take(160).collect())
+    }
+}
+
 /// Parse journalctl short-unix output into bounded classified events.
 /// Only source/subject identifiers and UTC seconds survive; raw messages are discarded.
 pub fn parse_journal(content: &str) -> Vec<Event> {
+    parse_journal_with_context(content).0
+}
+
+pub fn parse_journal_with_context(content: &str) -> (Vec<Event>, Vec<EventContext>) {
     let mut seen = HashSet::new();
     let mut events = Vec::new();
+    let mut contexts = Vec::new();
     let mut network_transition_until = 0_u64;
     for line in content.lines() {
         let mut parts = line.trim().splitn(2, char::is_whitespace);
@@ -806,6 +920,11 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
         }
         let subject = event_subject(body, kind);
         if seen.insert((unix, kind.as_str(), subject.clone())) {
+            if let Some(signal) = diagnostic_signal(body, kind) {
+                contexts.push(EventContext {
+                    timestamp: unix, kind, subject: subject.clone(), signal,
+                });
+            }
             events.push(Event {
                 timestamp: unix, kind, subject, source,
             });
@@ -814,7 +933,7 @@ pub fn parse_journal(content: &str) -> Vec<Event> {
     events.sort_by(|a,b| a.timestamp.cmp(&b.timestamp)
         .then(a.kind.as_str().cmp(b.kind.as_str()))
         .then(a.subject.cmp(&b.subject)));
-    events
+    (events, contexts)
 }
 
 pub fn classify_log_line(text: &str) -> Option<EventKind> {
@@ -910,6 +1029,41 @@ pub fn classify_log_line(text: &str) -> Option<EventKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostic_indicators_are_specific_but_never_include_raw_log_secrets() {
+        let logs = concat!(
+            "1794499327.0 machine kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff (Reason: 2=PREV_AUTH_NOT_VALID) secret=keep-me-private\n",
+            "1794499328.0 machine systemd[1]: sshd.service: Main process exited, code=exited, status=1/FAILURE token=topsecret\n",
+            "1794499329.0 machine NetworkManager[8]: device (wlan0): state change: activated -> disconnected (reason 'carrier-changed')\n",
+            "1794499330.0 machine systemd-resolved[44]: DNS query SERVFAIL for account.internal.example\n",
+        );
+        let (events, contexts) = parse_journal_with_context(logs);
+        assert_eq!(events.len(), 4);
+        assert!(contexts.iter().any(|d| d.kind == EventKind::LinkDown
+            && d.subject.as_deref() == Some("wlan0") && d.signal.contains("reason=2=PREV_AUTH_NOT_VALID")));
+        assert!(contexts.iter().any(|d| d.kind == EventKind::ServiceFailure
+            && d.subject.as_deref() == Some("sshd.service") && d.signal.contains("exit_status=1/FAILURE")));
+        assert!(contexts.iter().any(|d| d.kind == EventKind::DnsProblem
+            && d.signal.contains("dns_reply=SERVFAIL")));
+        assert!(contexts.iter().all(|d| d.signal.len() <= 160
+            && !d.signal.contains("private") && !d.signal.contains("secret")
+            && !d.signal.contains("aa:bb") && !d.signal.contains("account.internal")));
+        assert_eq!(parse_journal(logs).len(), events.len());
+    }
+
+    #[test]
+    fn unknown_reason_text_is_not_forwarded_as_diagnostic_code() {
+        assert_eq!(diagnostic_signal(
+            "wlan0: deauthenticated (Reason: 2=SUPERSENSITIVE_TOKEN)",
+            EventKind::LinkDown).as_deref(), Some("reason=2"));
+        assert_eq!(diagnostic_signal(
+            "sshd.service: failed with result 'my-login-secret'",
+            EventKind::ServiceFailure), None);
+        assert_eq!(diagnostic_signal(
+            "sshd.service: main process exited status=1/ACCESS_TOKEN",
+            EventKind::ServiceFailure).as_deref(), Some("exit_status=1"));
+    }
 
     #[test]
     fn real_manjaro_journal_classifies_wifi_recovery_usb_and_restart() {

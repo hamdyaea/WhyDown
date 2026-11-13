@@ -2,6 +2,22 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.11.0] - 2026-11-13
+
+### Evidence-first incident investigation
+- Replace the small findings/evidence split view with an **Incident overview** showing warning-first rows, specific affected interfaces or units when identifiable, first UTC event time and retained event counts. Single-click provides a short evidence preview.
+- **Double-click** an alert to open the dedicated **Incident details** page, with Back navigation. Every dossier contains severity, scope/confidence, precise classified event timestamps, source and subject, safely extracted diagnostic codes, finding evidence, current network/systemd snapshots, bounded incident-window context, and suggested read-only checks. Timeline rows support their own double-click dossier.
+- Make the first page less generic: name unique affected Wi-Fi/network interfaces and failed systemd units directly in the alert title when confidently attributed.
+- Surface representative sanitized indicators and interpretations (such as Wi-Fi reason 2 or systemd exit status 1) in the incident preview/details, and generate target-specific but never automatically executed read-only command suggestions.
+- Increase the bounded classified event timeline from 60 to 300 events. Details show up to the newest 80 matching events, and clearly distinguish retained history from a full journal.
+- Extract limited, **whitelisted** Wi-Fi disconnect reason codes, service exit statuses/results, DHCP timeouts and known state transitions without retaining free-form journal lines, secrets, SSIDs, MACs or command arguments. Report schema v2 adds optional `timeline[].diagnostic_hint` (null when unavailable).
+- Improve the fictional demo to illustrate specific Wi-Fi/DHCP/systemd indicator values. Neither the diagnostic engine nor the GUI probes network hosts, restarts services or exports data automatically.
+
+### Verification
+- Unit tests for strict indicator whitelisting, privacy, timestamp and affected-system attribution; GUI model tests for per-finding dossiers and isolation between unrelated incidents.
+- Real Qt6/Xvfb test double-clicks a finding, verifies second-page evidence, navigates back, inspects timeline items and repeats selection/clipboard tests.
+- Live CachyOS, Manjaro and Debian incident-drilldown testing remains to be confirmed after release.
+
 ## [0.10.3] - 2026-11-12
 
 ### Official visual identity

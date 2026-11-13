@@ -323,6 +323,16 @@ pub struct CollectorTiming {
     pub succeeded: bool,
 }
 
+/// Optional, strictly whitelisted fault/status codes extracted from classified
+/// journal lines. No original messages, hostnames, addresses or arguments.
+#[derive(Debug, Clone)]
+pub struct EventContext {
+    pub timestamp: u64,
+    pub kind: EventKind,
+    pub subject: Option<String>,
+    pub signal: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub os: String,
@@ -366,6 +376,8 @@ pub struct Snapshot {
     pub disks: Vec<DiskUsage>,
     pub disk_breakdowns: Vec<DiskBreakdown>,
     pub events: Vec<Event>,
+    /// Safe, bounded details for those classified events only.
+    pub event_contexts: Vec<EventContext>,
     /// True only when journalctl completed successfully; empty logs may still be valid.
     pub journal_checked: bool,
     /// True if at least one older entry was omitted after collecting limit + 1.
@@ -411,6 +423,7 @@ impl Default for Snapshot {
             disks: Vec::new(),
             disk_breakdowns: Vec::new(),
             events: Vec::new(),
+            event_contexts: Vec::new(),
             journal_checked: false,
             journal_truncated: false,
             journal_entries_examined: 0,

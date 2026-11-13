@@ -1,6 +1,6 @@
 //! Deterministic example inputs for screenshots and smoke tests.
 
-use crate::model::{CollectorTiming, DiskUsage, DpkgProblem, Event, EventKind, InterfaceStats,
+use crate::model::{CollectorTiming, DiskUsage, DpkgProblem, Event, EventContext, EventKind, InterfaceStats,
     MemoryHealth, PressureHealth, FileHandleHealth, InodeHealth, Snapshot};
 use crate::time::now_unix;
 
@@ -55,6 +55,23 @@ pub fn snapshot() -> Snapshot {
             Event { timestamp: now.saturating_sub(235), kind: EventKind::DhcpProblem, subject: Some("wlan0".into()), source: Some("NetworkManager".into()) },
             Event { timestamp: now.saturating_sub(225), kind: EventKind::DnsProblem, subject: None, source: Some("systemd-resolved".into()) },
             Event { timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure, subject: Some("example-backup.service".into()), source: Some("systemd".into()) },
+        ],
+        event_contexts: vec![
+            EventContext {
+                timestamp: now.saturating_sub(240), kind: EventKind::LinkDown,
+                subject: Some("wlan0".into()),
+                signal: "reason=2=PREV_AUTH_NOT_VALID".into(),
+            },
+            EventContext {
+                timestamp: now.saturating_sub(235), kind: EventKind::DhcpProblem,
+                subject: Some("wlan0".into()),
+                signal: "dhcp_timeout=reported".into(),
+            },
+            EventContext {
+                timestamp: now.saturating_sub(180), kind: EventKind::ServiceFailure,
+                subject: Some("example-backup.service".into()),
+                signal: "exit_status=1/FAILURE".into(),
+            },
         ],
         journal_checked: true,
         journal_truncated: false,
