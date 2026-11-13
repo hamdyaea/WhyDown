@@ -40,43 +40,12 @@ sh scripts/install.sh --desktop
 The installer checks optional graphical dependencies and tells you what is
 missing. It does **not** install system packages automatically.
 
-### Native packages: Kali, Debian, Ubuntu and Arch derivatives
+### Native packages
 
-**Kali / Debian / Ubuntu**: GitHub Releases publish architecture-specific
-`.deb` files for **amd64** and **arm64** (same Debian package across these
-distributions). Download the correct architecture and install it with:
-
-```bash
-sudo apt install ./whydown_0.12.2-1_amd64.deb  # x86_64 Intel/AMD
-# or: sudo apt install ./whydown_0.12.2-1_arm64.deb  # 64-bit ARM
-whydown --version
-whydown gui
-```
-
-The package installs `/usr/bin/whydown`, a freedesktop launcher and icon.
-The CLI/TUI work without Python/Qt; `python3` and `python3-pyqt6`
-are **recommended** for the desktop GUI. These .deb files are built from
-statically linked musl binaries for broad glibc distribution compatibility.
-They do not modify any services.
-
-**Arch / Manjaro / CachyOS**: the same AUR `PKGBUILD` works on all three.
-Find the ready-to-submit stable source recipe in
-[`packaging/aur/whydown/`](packaging/aur/whydown/) and deployment instructions
-in [AUR packaging](packaging/aur/README.md). A `whydown-bin` recipe may also
-be supplied with pinned checksums once the corresponding release archives exist.
-AUR submissions are independent of GitHub Releases and require AUR SSH access.
-Do not install both the source and binary variants.
-
-**Manual .deb build** (on compatible Debian-family amd64 or arm64):
-
-```bash
-cargo build --release --locked
-bash packaging/deb/build-deb.sh target/release/whydown dist
-dpkg-deb --info dist/whydown_*.deb
-```
-
-All native-package scripts are in the repository; the binary releases
-remain available for people who prefer the unprivileged `~/.local/bin` installer.
+Kali, Debian and Ubuntu share amd64/arm64 `.deb` packages on
+[GitHub Releases](https://github.com/hamdyaea/WhyDown/releases).
+Arch, Manjaro and CachyOS share the [AUR recipes](packaging/aur/).
+See [native packaging details](docs/PACKAGING.md).
 
 ### GUI prerequisites (Qt 6)
 
@@ -119,33 +88,13 @@ repaired or uploaded; original messages can contain secrets.
 ## Useful commands
 
 ```bash
-# Inspect all areas over the last 4 hours (current boot)
 ~/.local/bin/whydown diagnose --focus all --since 4h --current-boot
-
-# Display original, potentially sensitive journal and application error details
 ~/.local/bin/whydown diagnose --focus all --since 4h --current-boot --journal-messages
-
-# Troubleshoot the network only
-~/.local/bin/whydown diagnose --focus network --since 2h
-
-# Run a guided terminal investigation
 ~/.local/bin/whydown tui
-
-# Explore a fictional example without reading your computer
 ~/.local/bin/whydown gui --demo
-~/.local/bin/whydown tui --demo
-
-# Save a private structured report
 ~/.local/bin/whydown diagnose --format json --output report.json
-
-# Export a readable HTML report
 ~/.local/bin/whydown diagnose --format html --output report.html
-
-# Show every CLI option
 ~/.local/bin/whydown --help
-
-# Show the WD project logo in ASCII
-~/.local/bin/whydown logo
 ```
 
 ## Nagios / Icinga monitoring and graphs
