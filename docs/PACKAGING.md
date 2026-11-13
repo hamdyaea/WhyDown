@@ -7,8 +7,8 @@
 distributions). Download the correct architecture and install it with:
 
 ```bash
-sudo apt install ./whydown_0.12.2-1_amd64.deb  # x86_64 Intel/AMD
-# or: sudo apt install ./whydown_0.12.2-1_arm64.deb  # 64-bit ARM
+sudo apt install ./whydown_0.12.3-1_amd64.deb  # x86_64 Intel/AMD
+# or: sudo apt install ./whydown_0.12.3-1_arm64.deb  # 64-bit ARM
 whydown --version
 whydown gui
 ```

@@ -69,5 +69,7 @@ dpkg-deb -x "$deb" "$stage/unpack"
 python3 -m json.tool "$stage/demo.json" >/dev/null
 test -s "$stage/unpack/usr/share/icons/hicolor/256x256/apps/whydown.png"
 test -f "$stage/unpack/usr/share/applications/whydown.desktop"
-sha256sum "$deb" > "$deb.sha256"
+( cd "$out" && sha256sum "$(basename "$deb")" > "$(basename "$deb").sha256" )
+# Release assets must remain verifiable after download or relocation.
+( cd "$out" && sha256sum -c "$(basename "$deb").sha256" )
 printf 'Built and verified %s\n' "$deb"

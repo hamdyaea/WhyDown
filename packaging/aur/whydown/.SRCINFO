@@ -1,6 +1,6 @@
 pkgbase = whydown
 	pkgdesc = Evidence-based read-only Linux diagnostics (CLI, TUI, Qt6 GUI)
-	pkgver = 0.12.2
+	pkgver = 0.12.3
 	pkgrel = 1
 	url = https://github.com/hamdyaea/WhyDown
 	arch = x86_64
@@ -10,7 +10,7 @@ pkgbase = whydown
 	makedepends = git
 	depends = glibc
 	optdepends = python-pyqt6: optional Qt6 graphical interface
-	source = whydown::git+https://github.com/hamdyaea/WhyDown.git#tag=v0.12.2
+	source = whydown::git+https://github.com/hamdyaea/WhyDown.git#tag=v0.12.3
 	sha256sums = SKIP
 
 pkgname = whydown
