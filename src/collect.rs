@@ -253,9 +253,11 @@ pub fn collect_with_options(
         )),
     }
 
-    // Historical systemd failure messages are not proof that the unit is still
-    // failed. Query only a few strictly validated system-unit names using a
-    // bounded, read-only subprocess. Never query names supplied as CLI options.
+    // A historical failure is never proof of a currently failed service.
+    // Query only whitelisted journal-attributed units, never command-line names.
+    // A system unit may not exist in the user's manager and vice versa:
+    // probe both bounded managers, record *which manager answered*, and never
+    // invent an active state when a transient GUI unit has disappeared.
     if focus.includes(Focus::Services) && snapshot.journal_checked {
         let mut names: Vec<String> = snapshot.events.iter()
             .filter(|e| e.kind == EventKind::ServiceFailure)
@@ -267,29 +269,48 @@ pub fn collect_with_options(
         names.dedup();
         names.truncate(4);
         for name in names {
-            progress.detail("systemctl show historical failure unit (max 3s each)");
-            let args = ["show", "--no-pager",
-                "--property=LoadState,ActiveState,SubState,Result,NRestarts",
-                "--", name.as_str()];
-            let start = Instant::now();
-            let state = run_capture_with_limits(
-                "systemctl", &args, Duration::from_secs(3), 8 * 1024);
-            snapshot.collector_timings.push(CollectorTiming {
-                name: "systemd historical unit status",
-                elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                succeeded: matches!(&state, Ok((true, _))),
-            });
-            match state {
-                Ok((true, output)) => {
-                    if let Some(status) = parse_service_status(&name, &output) {
-                        snapshot.service_statuses.push(status);
-                    } else {
-                        snapshot.notes.push(format!(
-                            "Current system-manager status unavailable for {name}; not assumed active"));
-                    }
+            let user_first = snapshot.failed_user_units.as_ref()
+                .is_some_and(|units| units.contains(&name))
+                || name.starts_with("app-");
+            let managers = if user_first { ["user", "system"] }
+                else { ["system", "user"] };
+            let mut found = None;
+            for manager in managers {
+                if manager == "user" && snapshot.failed_user_units.is_none() {
+                    // The user manager was unavailable during collection.
+                    continue;
                 }
-                _ => snapshot.notes.push(format!(
-                    "Could not query current system-manager status for {name}; not assumed active")),
+                progress.detail("systemctl show historical unit in correct manager (max 3s each)");
+                let property = "--property=LoadState,ActiveState,SubState,Result,NRestarts,Transient,FragmentPath,ExecMainStatus";
+                let args_user = ["--user", "show", "--no-pager", property, "--", name.as_str()];
+                let args_system = ["show", "--no-pager", property, "--", name.as_str()];
+                let args: &[&str] = if manager == "user" { &args_user } else { &args_system };
+                let start = Instant::now();
+                let state = run_capture_with_limits(
+                    "systemctl", args, Duration::from_secs(3), 8 * 1024);
+                let parsed = match state {
+                    Ok((true, output)) => parse_service_status(&name, manager, &output),
+                    _ => None,
+                };
+                snapshot.collector_timings.push(CollectorTiming {
+                    name: if manager == "user" {
+                        "systemd user historical unit status"
+                    } else {
+                        "systemd system historical unit status"
+                    },
+                    elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                    succeeded: parsed.is_some(),
+                });
+                if parsed.is_some() {
+                    found = parsed;
+                    break;
+                }
+            }
+            if let Some(status) = found {
+                snapshot.service_statuses.push(status);
+            } else {
+                snapshot.notes.push(format!(
+                    "Current unit state unavailable for {name} in accessible system/user managers;                      transient units may have disappeared; state not assumed active"));
             }
         }
     }
@@ -609,16 +630,36 @@ fn safe_service_unit_name(unit: &str) -> bool {
             || matches!(b, b'@' | b'.' | b'_' | b'-' | b':'))
 }
 
-fn parse_service_status(unit: &str, output: &str) -> Option<ServiceStatus> {
-    if !safe_service_unit_name(unit) { return None; }
+fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<ServiceStatus> {
+    if !safe_service_unit_name(unit) || !matches!(manager, "system" | "user") {
+        return None;
+    }
     let mut load = None;
     let mut active = None;
     let mut sub = None;
     let mut result = None;
     let mut n_restarts = None;
+    let mut transient = None;
+    let mut desktop_entry = false;
+    let mut exec_main_status = None;
     for line in output.lines() {
         let Some((key, value)) = line.split_once('=') else { continue };
         let value = value.trim();
+        // Never keep arbitrary FragmentPath/ExecStart contents. Retain only
+        // the boolean that the unit came from a .desktop launcher.
+        if key == "FragmentPath" {
+            desktop_entry = value.starts_with("/usr/share/applications/")
+                && value.ends_with(".desktop") && value.len() <= 256;
+            continue;
+        }
+        if key == "Transient" {
+            transient = match value { "yes" => Some(true), "no" => Some(false), _ => None };
+            continue;
+        }
+        if key == "ExecMainStatus" {
+            exec_main_status = value.parse::<u64>().ok().filter(|n| *n <= 255);
+            continue;
+        }
         if value.len() > 64 || !value.bytes().all(|c| c.is_ascii_alphanumeric()
             || matches!(c, b'-' | b'_')) { continue; }
         match key {
@@ -631,12 +672,12 @@ fn parse_service_status(unit: &str, output: &str) -> Option<ServiceStatus> {
         }
     }
     let load_state = load?;
-    // Avoid claiming a system-unit status for user-only/unknown unit names.
     if load_state == "not-found" { return None; }
     Some(ServiceStatus {
-        unit: unit.to_owned(), load_state,
-        active_state: active?, sub_state: sub?, result: result?,
-        n_restarts,
+        unit: unit.to_owned(), manager: manager.to_owned(),
+        transient, desktop_entry, exec_main_status,
+        load_state, active_state: active?, sub_state: sub?,
+        result: result?, n_restarts,
     })
 }
 
