@@ -332,3 +332,13 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
 - TUI shows the ASCII logo on the dashboard without changing navigation.
 - Qt6 Xvfb verifies icon loading into the actual window and sidebar.
 - Installer desktop smoke test compares PNG icon bytes and validates Icon=whydown.
+
+## v0.11.0 incident dossiers and privacy rules (schema v2)
+
+- Rust parses classified journal events into existing timestamp/source/subject identifiers plus **optional bounded whitelist-only** diagnostic indicators. Tests cover Wi-Fi reason 2=PREV_AUTH_NOT_VALID, service status 1/FAILURE and DNS SERVFAIL while checking that private tokens/BSSIDs/hostnames never survive.
+- Unrecognized text is dropped: the user sees explicit missing evidence rather than fabricated reasons.
+- Dashboard alert titles include a specific interface or systemd unit only when exactly one identifiable target is observed.
+- The JSON timeline retains up to 300 latest classified events. GUI dossiers are based on that retained timeline (newest 80 relevant events shown per page), with first/last times and the relevant current local snapshot clearly identified as a separate point in time.
+- Qt6 GUI unit tests verify DNS, Wi-Fi, systemd and current snapshot cases; they prevent event leakage between unrelated findings and enforce bounded output.
+- Real GUI Xvfb smoke test double-clicks the first alert, navigates to the second details page, checks evidence/controls, inspects a timeline event and returns to overview; original mouse text selection and Ctrl+C remain tested.
+- Live diagnostic testing on CachyOS/Manjaro/Debian and privacy review of real logs remain outstanding field checks.
