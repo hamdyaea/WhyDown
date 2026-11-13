@@ -1145,6 +1145,7 @@ mod tests {
             kind: event.kind,
             subject: event.subject.clone(),
             signal: "exit_status=24; process_code=exited; systemd_result=exit-code".into(),
+            journal_messages: vec![],
         };
         let clean = Snapshot {
             system_units_checked: true,
