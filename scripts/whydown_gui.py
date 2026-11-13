@@ -237,6 +237,7 @@ FINDING_EVENT_KINDS = {
     "DHCP_BEFORE_DNS": ("dhcp_problem", "dns_failure"),
     "WIFI_LOCAL_ROAM_OBSERVED": ("wifi_roam_start", "wifi_associated"),
     "SERVICE_FAILURE_LOGS": ("service_failure",),
+    "DESKTOP_LAUNCH_EXIT_LOGS": ("service_failure",),
     "SERVICE_RESTART_OBSERVED": ("service_restart_scheduled", "service_failure"),
     "OOM_EVENTS": ("out_of_memory",),
     "STORAGE_ERRORS": ("storage_error",),
@@ -254,6 +255,12 @@ def related_events(report, finding):
     # These rules describe a particular unit/interface or a particular
     # correlated pair. Do not display unrelated events of the same kind.
     evidence = [str(v) for v in (finding.get("evidence") or [])]
+    if rule == "DESKTOP_LAUNCH_EXIT_LOGS":
+        # This finding covers only the observed exit-24 desktop launches,
+        # not unrelated systemd errors in the same historical window.
+        events = [e for e in events if str(e.get("subject", "")).startswith("app-")
+                  and any(part == "exit_status=24" or part.startswith("exit_status=24/")
+                          for part in str(e.get("diagnostic_hint") or "").split("; "))]
     if rule in ("SERVICE_RESTART_OBSERVED", "WIFI_LOCAL_ROAM_OBSERVED") and evidence:
         target = evidence[0].split(":", 1)[0].strip()
         if re.fullmatch(r"[a-zA-Z0-9_.@-]{1,64}", target):
@@ -324,14 +331,23 @@ def targeted_readonly_commands(report, finding, events):
         commands.append("journalctl -u NetworkManager --no-pager -n 100")
         commands.append("journalctl -u systemd-networkd --no-pager -n 100")
     elif rule in ("FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
-                  "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED"):
-        user = rule == "FAILED_USER_SYSTEMD_UNITS"
-        flag = "--user " if user else ""
-        commands.append(f"systemctl {flag}--failed --no-pager")
+                  "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED",
+                  "DESKTOP_LAUNCH_EXIT_LOGS"):
+        default_user = rule in ("FAILED_USER_SYSTEMD_UNITS", "DESKTOP_LAUNCH_EXIT_LOGS")
+        commands.extend(("systemctl --failed --no-pager",
+                         "systemctl --user --failed --no-pager"))
+        scoped = {str(x.get("unit")): x.get("manager")
+                  for x in (sysinfo.get("service_statuses") or [])}
         for unit in safe[:8]:
             if not unit.endswith((".service", ".socket", ".target", ".mount",
                                   ".timer", ".path")):
                 continue
+            manager = scoped.get(unit)
+            # app-* is a weak desktop-session clue if a transient unit has
+            # already disappeared; never pass unknown names to the shell.
+            user = manager == "user" or (manager is None and
+                                         (default_user or unit.startswith("app-")))
+            flag = "--user " if user else ""
             commands.append(f"systemctl {flag}status {unit} --no-pager")
             commands.append(f"journalctl {'--user ' if user else ''}-u {unit} --no-pager -n 100")
     return commands[:20]
@@ -422,6 +438,7 @@ def detailed_incident(report, finding):
     elif finding.get("id") in (
         "FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
         "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED",
+        "DESKTOP_LAUNCH_EXIT_LOGS",
     ):
         lines.extend(["", "CURRENT SYSTEMD STATE (SEPARATE FROM HISTORICAL ERRORS)"])
         if sysinfo.get("system_units_checked"):
@@ -434,11 +451,14 @@ def detailed_incident(report, finding):
                      + (", ".join(map(str, user_failed)) if user_failed is not None else "not verified"))
         for state in sysinfo.get("service_statuses") or []:
             lines.append(
-                f" • {state.get('unit', '?')}: "
+                f" • {state.get('unit', '?')} [{state.get('manager', 'unknown')} manager]: "
                 f"load={state.get('load_state', '?')}, "
                 f"active={state.get('active_state', '?')}, "
                 f"sub={state.get('sub_state', '?')}, "
                 f"result={state.get('result', '?')}, "
+                f"exit_status={state.get('exec_main_status')}, "
+                f"transient={state.get('transient')}, "
+                f"desktop_launcher={state.get('desktop_entry')}, "
                 f"restarts={state.get('n_restarts', 'unknown')}")
         for group in (report.get("service_event_windows") or [])[-12:]:
             lines.append(
@@ -493,8 +513,9 @@ def coverage_details(r):
              f"Disk usage checked: {sysinfo.get('disk_usage_checked', False)}",
              "", "CURRENT SERVICE SNAPSHOTS"]
     for v in (sysinfo.get("service_statuses") or [])[:20]:
-        lines.append(f" • {v.get('unit', '?')}: {v.get('active_state', '?')}/"
-                     f"{v.get('sub_state', '?')}; result={v.get('result', '?')}")
+        lines.append(f" • {v.get('unit', '?')} [{v.get('manager', 'unknown')}]: "
+                     f"{v.get('active_state', '?')}/{v.get('sub_state', '?')}; "
+                     f"result={v.get('result', '?')}; exit_status={v.get('exec_main_status')}")
     lines.extend(["", "COLLECTOR LIMITATIONS"])
     notes = r.get("collection_notes") or []
     lines.extend(" • " + str(e) for e in notes[:80])
