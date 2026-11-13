@@ -11,7 +11,7 @@ Consumers must check `schema_version` and should compare the same `focus` and `l
 - `system`: OS/kernel, uptime, routes, local DNS configuration, failed systemd units, interfaces with counters and optional `operstate`, disks and optional directory breakdowns
 - `findings`: `id`, `severity`, `confidence`, `scope`, `title`, `explanation`, `evidence`, `checks`
 - `network_incidents`: historical event clusters, including `subject` (identified network interface, or `null`) and start/end times
-- `timeline`: `timestamp`, `kind`, `label`, `subject`, `source` and optional `diagnostic_hint`; subject/source/hint are `null` when unavailable
+- `timeline`: `timestamp`, `kind`, `label`, `subject`, `source`, nullable `diagnostic_hint` and `journal_messages` (array of original message bodies, empty unless opted in); subject/source/hint are `null` when unavailable
 - `collection_notes`: permission, missing-command and journal-truncation caveats
 
 ## Temporal scope and confidence
@@ -28,7 +28,7 @@ The engine never probes network endpoints and does not monitor continuously.
 
 ## Privacy and schema compatibility
 
-Only short, ASCII-validated program, network-interface or systemd-unit identifiers and explicitly whitelisted reason/status indicators are extracted from classified journal entries. No raw journal line is kept. The output may nevertheless contain mountpoints, names of local units/interfaces and other configuration identifiers; review before sharing.
+By default, only short, ASCII-validated program/network-interface/systemd-unit identifiers and whitelisted reason/status indicators are extracted; no original journal lines are retained. With `--journal-messages` (enabled by default in Qt6 GUI, with a checkbox to disable it), original classified message bodies may appear in `timeline[].journal_messages`. The original text is not redacted and may contain secrets. It omits the journal header and is bounded to three messages of up to 240 characters per event, only among the last 300 events. The output may also contain local mountpoints and configuration identifiers; review before sharing.
 
 Do not silently parse schema 2 as schema 1. For distribution comparisons, use finding IDs, scopes, summaries and limitations rather than timestamps or hostnames.
 
@@ -194,3 +194,15 @@ narrow historical user-app launcher exit-24 situation with no currently
 failed user/system units; it is not proof of a successful GUI handoff and
 does not suppress unrelated service failures. The `schema_version` is
 unchanged at **2**.
+
+## Opt-in original journal evidence (schema remains 2)
+
+`timeline[].journal_messages` is an additive array. It is empty by default
+for real diagnostics and can contain up to three original message bodies per
+retained classified event when `--journal-messages` is given. The Qt6 GUI
+enables this local evidence display by default with a sensitive-data checkbox;
+users can disable it before collection. Message bodies are not redacted and
+can contain private or secret information. The JSON, text and HTML report
+outputs retain the same evidence when enabled; exported files should be
+reviewed before sharing. No unclassified journal entries are collected.
+
