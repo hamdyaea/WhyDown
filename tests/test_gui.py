@@ -22,7 +22,7 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("4h", cmd)
         self.assertIn("--current-boot", cmd)
         self.assertIn("10000", cmd)
-        self.assertEqual(cmd[-2:], ["--no-progress", "--current-boot"])
+        self.assertEqual(cmd[-3:], ["--no-progress", "--current-boot", "--journal-messages"])
         self.assertNotIn("--output", cmd)
         self.assertNotIn("--exit-on-warning", cmd)
 
@@ -32,6 +32,7 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertNotIn("--current-boot", cmd)
         self.assertNotIn("--disk-details", cmd)
         self.assertNotIn("--include-remote-mounts", cmd)
+        self.assertNotIn("--journal-messages", cmd)
 
     def test_opt_in_remote_mounts_and_custom_lookback(self):
         cmd = gui.build_command(
@@ -41,6 +42,9 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("--disk-details", cmd)
         self.assertIn("--include-remote-mounts", cmd)
         self.assertNotIn("--current-boot", cmd)
+        self.assertIn("--journal-messages", cmd)
+        private_cmd = gui.build_command("/opt/bin/whydown", journal_messages=False)
+        self.assertNotIn("--journal-messages", private_cmd)
 
     def test_reject_unsafe_or_out_of_bounds_options(self):
         for value in ("0h", "31d", "1s", "4h;rm", "1h\nbad", "bad"):
@@ -111,6 +115,31 @@ class TestWhyDownGUI(unittest.TestCase):
         self.assertIn("lightdm.service", coverage)
         self.assertIn("Journal window partial: True", coverage)
         self.assertIn("connectivity", coverage)
+
+    def test_original_journal_evidence_is_visible_in_preview_and_detail(self):
+        data = self.fixture()
+        finding = {"id": "SERVICE_FAILURE_LOGS", "title": "Systemd problem",
+                   "severity": "warning", "evidence": ["Failed launch"],
+                   "scope": "historical_journal", "confidence": "observed"}
+        data["timeline"] = [{
+            "timestamp": "2026-11-13T10:30:00Z",
+            "kind": "service_failure", "subject": "example.service",
+            "source": "systemd", "diagnostic_hint": "exit_status=24",
+            "journal_messages": [
+                "example.service: Main process exited, code=exited, status=24",
+                "example.service: Failed with result 'exit-code'.",
+            ],
+        }]
+        preview = gui.overview_row(data, finding)["preview"]
+        self.assertIn("Actual journal:", preview)
+        self.assertIn("status=24", preview)
+        dossier = gui.detailed_incident(data, finding)
+        self.assertIn("Original journal message (sensitive)", dossier)
+        self.assertIn("Failed with result 'exit-code'", dossier)
+        event = gui.event_dossier(data["timeline"][0])
+        self.assertIn("Main process exited", event)
+        data["timeline"][0]["journal_messages"] = []
+        self.assertNotIn("Actual journal:", gui.overview_row(data, finding)["preview"])
 
     def test_detailed_incident_has_specific_wifi_and_systemd_evidence(self):
         data = self.fixture()
