@@ -151,7 +151,7 @@ def stylesheet_for(preference, system_dark):
 
 def build_command(binary, *, demo=False, focus="all", since="4h",
                   max_events=10000, current_boot=True, disk_details=False,
-                  include_remote_mounts=False):
+                  include_remote_mounts=False, journal_messages=True):
     if focus not in FOCUSES:
         raise ValueError("Invalid diagnostic scope")
     match = re.fullmatch(r"([0-9]+)([mhd])", since)
@@ -168,6 +168,7 @@ def build_command(binary, *, demo=False, focus="all", since="4h",
     if current_boot and not demo: cmd.append("--current-boot")
     if disk_details and not demo: cmd.append("--disk-details")
     if include_remote_mounts and not demo: cmd.append("--include-remote-mounts")
+    if journal_messages and not demo: cmd.append("--journal-messages")
     return cmd
 
 def load_brand_pixmap(binary):
@@ -296,6 +297,10 @@ def overview_row(report, finding):
                    if e.get("diagnostic_hint")), None)
     if signal:
         summary = str(summary) + "  |  Indicator: " + signal
+    original = next((str(messages[0]) for e in reversed(events)
+                     if (messages := e.get("journal_messages") or [])), None)
+    if original:
+        summary = str(summary) + "  |  Actual journal: " + original[:220]
     return {
         "severity": str(finding.get("severity", "?")).upper(),
         "title": str(finding.get("title", "Finding")),
@@ -378,7 +383,7 @@ def detailed_incident(report, finding):
         lines.append(f"Last matching event in retained timeline: {events[-1].get('timestamp', '?')}")
     lines.extend(["", "WHAT WHYDOWN OBSERVED",
                   str(finding.get("explanation", "")), "",
-                  "CLASSIFIED JOURNAL EVENTS (time / source / affected / safe diagnostic code)"])
+                  "CLASSIFIED JOURNAL EVENTS (time / source / affected / safe diagnostic code / original message)"])
     if events:
         for i, event in enumerate(events[-80:], 1):
             lines.append(
@@ -386,6 +391,8 @@ def detailed_incident(report, finding):
                 f"{event.get('kind', '?')}  source={event.get('source') or 'unknown'}  "
                 f"subject={event.get('subject') or 'unknown'}")
             signal = event.get("diagnostic_hint")
+            for message in (event.get("journal_messages") or [])[:3]:
+                lines.append(f"    Original journal message (sensitive): {message}")
             if signal:
                 lines.append(f"    Indicator: {signal}")
                 if "PREV_AUTH_NOT_VALID" in signal:
@@ -481,7 +488,7 @@ def detailed_incident(report, finding):
     lines.extend(["", "CONFIDENCE AND LIMITATIONS",
                   "This is a local snapshot plus classified historical events, not a confirmed root cause.",
                   "Current status may have changed since a historical incident.",
-                  "No raw journal messages or credentials are retained in this report.",
+                  "Original journal messages are included only when selected and may contain sensitive data.",
                   "The timeline contains at most 300 recent classified events, not necessarily all incidents."])
     if report.get("journal_truncated"):
         lines.append("PARTIAL JOURNAL: older records were excluded by the event limit.")
@@ -496,9 +503,13 @@ def event_dossier(event):
              f"Category: {event.get('label', event.get('kind', 'unknown'))}",
              f"Source: {event.get('source') or 'not identified'}",
              f"Affected subject: {event.get('subject') or 'not identified'}",
-             f"Safe diagnostic indicator: {event.get('diagnostic_hint') or 'not available'}",
-             "", "The journal message itself was not retained for privacy.",
-             "A journal event does not prove that the fault is still present."]
+             f"Safe diagnostic indicator: {event.get('diagnostic_hint') or 'not available'}"]
+    messages = event.get("journal_messages") or []
+    lines.extend(["", "ORIGINAL JOURNAL MESSAGES (may contain sensitive data)"])
+    lines.extend(" • " + str(message) for message in messages[:3])
+    if not messages:
+        lines.append("No original journal messages were retained for this event.")
+    lines.append("A journal event does not prove that the fault is still present.")
     return "\n".join(lines)
 
 
@@ -708,8 +719,12 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.disk.setChecked(self.args.disk_details)
         self.remote = QtWidgets.QCheckBox("Include remote mounts (may block)")
         self.remote.setChecked(self.args.include_remote_mounts)
+        self.journal = QtWidgets.QCheckBox("Show original journal messages (sensitive)")
+        self.journal.setChecked(True)
+        self.journal.setToolTip("Show real classified journal messages locally. May contain secrets; the exported JSON also includes them.")
         advanced.addWidget(self.disk)
         advanced.addWidget(self.remote)
+        advanced.addWidget(self.journal)
         advanced.addStretch()
         fl.addLayout(advanced)
         main.addWidget(form)
@@ -848,7 +863,8 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
                 self.args.whydown_bin, demo=self.args.demo,
                 focus=self.focus.currentText(), since=self.since.currentText(),
                 max_events=int(self.cap.currentText()), current_boot=self.boot.isChecked(),
-                disk_details=self.disk.isChecked(), include_remote_mounts=self.remote.isChecked())
+                disk_details=self.disk.isChecked(), include_remote_mounts=self.remote.isChecked(),
+                journal_messages=self.journal.isChecked())
         except ValueError as err:
             QtWidgets.QMessageBox.warning(self, "Invalid scope", str(err))
             return
@@ -946,6 +962,9 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
                 str(e.get("label", e.get("kind", ""))),
                 str(e.get("subject") or ""), str(e.get("source") or "")])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, e)
+            original = e.get("journal_messages") or []
+            if original:
+                item.setToolTip(1, "\n".join(str(msg) for msg in original))
             self.events.addTopLevelItem(item)
         for i in range(4): self.events.resizeColumnToContents(i)
         self.coverage.setPlainText(coverage_details(r))
@@ -966,8 +985,8 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
                 f"{info['severity']}  •  {info['title']}\n"
                 f"Affected: {info['affected']}  |  First event: {info['observed']}\n"
                 f"{info['preview']}\n"
-                "Double-click this row to inspect matching event timestamps, "
-                "safe diagnostic codes, current system state and suggested checks.")
+                "Double-click this row to inspect original journal messages, timestamps, "
+                "diagnostic codes, current system state and suggested checks.")
             self.overview_preview.setPlainText(preview)
 
     def open_finding(self, item, _column=0):
@@ -1008,6 +1027,14 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
 
     def export_json(self):
         if self.raw_report is None: return
+        if any(e.get("journal_messages") for e in (self.report or {}).get("timeline", [])):
+            answer = QtWidgets.QMessageBox.question(
+                self, "Sensitive journal messages",
+                "This JSON includes original journal messages which may expose credentials, URLs or personal information. Save a private copy?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No)
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save private JSON report", "whydown-report.json", "JSON (*.json)")
         if not path: return
