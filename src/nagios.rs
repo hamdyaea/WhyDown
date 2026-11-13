@@ -201,8 +201,10 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
         }
         i += 1;
     }
-    if o.metric != "all" && spec_for(&o.metric).is_none() {
-        return Err(format!("unknown check metric: {}", o.metric));
+    if o.metric != "all" {
+        let canonical = spec_for(&o.metric)
+            .ok_or_else(|| format!("unknown check metric: {}", o.metric))?.choice;
+        o.metric = canonical.to_string();
     }
     if o.metric == "all" && (o.warning.is_some() || o.critical.is_some()) {
         return Err("custom thresholds require --metric NAME (not all)".into());
@@ -522,6 +524,10 @@ pub fn append_history(path: &Path, samples: &[Sample], demo: bool) -> Result<(),
 }
 
 pub fn run(args: &[String]) -> u8 {
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("whydown {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
     if args.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
         println!("{HELP}");
         return 0;
