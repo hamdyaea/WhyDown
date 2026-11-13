@@ -56,7 +56,7 @@ fn nagios_recording_svg_dashboard_and_private_file_safety() {
     }
     let lines: Vec<_> = fs::read_to_string(&history).unwrap().lines()
         .map(str::to_string).collect();
-    assert_eq!(lines.len(), whydown::nagios::SPECS.len() * 2);
+    assert_eq!(lines.len(), (whydown::nagios::SPECS.len() - 1) * 2); // named service is excluded from all
     assert!(lines.iter().any(|l| l.contains("\tmem_used_pct\t62.5000\tOK\tdemo")));
     // Repeated samples in the same second are not a trend. Simulate a
     // distinct later timestamp to exercise an actual time-series line.
