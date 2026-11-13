@@ -1026,6 +1026,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn diagnostic_indicators_are_specific_but_never_include_raw_log_secrets() {
+        let logs = concat!(
+            "1794499327.0 machine kernel: wlan0: deauthenticated from aa:bb:cc:dd:ee:ff (Reason: 2=PREV_AUTH_NOT_VALID) secret=keep-me-private\\n",
+            "1794499328.0 machine systemd[1]: sshd.service: Main process exited, code=exited, status=1/FAILURE token=topsecret\\n",
+            "1794499329.0 machine NetworkManager[8]: device (wlan0): state change: activated -> disconnected (reason 'carrier-changed')\\n",
+            "1794499330.0 machine systemd-resolved[44]: DNS query SERVFAIL for account.internal.example\\n",
+        );
+        let (events, contexts) = parse_journal_with_context(logs);
+        assert_eq!(events.len(), 4);
+        assert!(contexts.iter().any(|d| d.kind == EventKind::LinkDown
+            && d.subject.as_deref() == Some("wlan0") && d.signal.contains("reason=2=PREV_AUTH_NOT_VALID")));
+        assert!(contexts.iter().any(|d| d.kind == EventKind::ServiceFailure
+            && d.subject.as_deref() == Some("sshd.service") && d.signal.contains("exit_status=1/FAILURE")));
+        assert!(contexts.iter().any(|d| d.kind == EventKind::DnsProblem
+            && d.signal.contains("dns_reply=SERVFAIL")));
+        assert!(contexts.iter().all(|d| d.signal.len() <= 160
+            && !d.signal.contains("private") && !d.signal.contains("secret")
+            && !d.signal.contains("aa:bb") && !d.signal.contains("account.internal")));
+        assert_eq!(parse_journal(logs).len(), events.len());
+    }
+
+    #[test]
+    fn unknown_reason_text_is_not_forwarded_as_diagnostic_code() {
+        assert_eq!(diagnostic_signal(
+            "wlan0: deauthenticated (Reason: 2=SUPERSENSITIVE_TOKEN)",
+            EventKind::LinkDown).as_deref(), Some("reason=2"));
+        assert_eq!(diagnostic_signal(
+            "sshd.service: failed with result 'my-login-secret'",
+            EventKind::ServiceFailure), None);
+        assert_eq!(diagnostic_signal(
+            "sshd.service: main process exited status=1/ACCESS_TOKEN",
+            EventKind::ServiceFailure).as_deref(), Some("exit_status=1"));
+    }
+
+    #[test]
     fn real_manjaro_journal_classifies_wifi_recovery_usb_and_restart() {
         let logs = concat!(
             "1794499282.0 host kernel: usb 1-5.1: USB disconnect, device number 7\n",
