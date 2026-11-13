@@ -280,6 +280,44 @@ def overview_row(report, finding):
     }
 
 
+
+def targeted_readonly_commands(report, finding, events):
+    """Suggest shell-safe, read-only commands for identified local subjects."""
+    rule = finding.get("id", "")
+    sysinfo = report.get("system") or {}
+    targets = {str(e.get("subject")) for e in events if e.get("subject")}
+    if rule == "FAILED_SYSTEMD_UNITS":
+        targets.update(str(v) for v in (sysinfo.get("failed_units") or []))
+    if rule == "FAILED_USER_SYSTEMD_UNITS":
+        targets.update(str(v) for v in (sysinfo.get("failed_user_units") or []))
+    # Never echo an unsafe identifier into a copyable shell command.
+    safe = sorted(t for t in targets if re.fullmatch(r"[a-zA-Z0-9_.@-]{1,64}", t))
+    commands = []
+    if rule in ("LINK_DISCONNECTS", "DHCP_FAILURES", "DNS_FAILURES",
+                "NETWORK_UNREACHABLE", "WIFI_LOCAL_ROAM_OBSERVED",
+                "LINK_BEFORE_DNS", "DHCP_BEFORE_DNS",
+                "RECENT_INTERFACE_DROPS", "IFACE_ERROR_COUNTERS"):
+        for iface in safe[:8]:
+            if not re.fullmatch(r"(wlan|wlp|wlx|eth|enp|ens|eno|enx|wwan|wg)[a-zA-Z0-9_.-]{0,58}", iface):
+                continue
+            commands.append(f"ip -s link show dev {iface}")
+            commands.append(f"nmcli device show {iface}    # if NetworkManager is installed")
+        commands.append("journalctl -u NetworkManager --no-pager -n 100")
+        commands.append("journalctl -u systemd-networkd --no-pager -n 100")
+    elif rule in ("FAILED_SYSTEMD_UNITS", "FAILED_USER_SYSTEMD_UNITS",
+                  "SERVICE_FAILURE_LOGS", "SERVICE_RESTART_OBSERVED"):
+        user = rule == "FAILED_USER_SYSTEMD_UNITS"
+        flag = "--user " if user else ""
+        commands.append(f"systemctl {flag}--failed --no-pager")
+        for unit in safe[:8]:
+            if not unit.endswith((".service", ".socket", ".target", ".mount",
+                                  ".timer", ".path")):
+                continue
+            commands.append(f"systemctl {flag}status {unit} --no-pager")
+            commands.append(f"journalctl {'--user ' if user else ''}-u {unit} --no-pager -n 100")
+    return commands[:20]
+
+
 def detailed_incident(report, finding):
     """Human-readable dossier from actual collected data, never inferred causes.
 
@@ -383,6 +421,13 @@ def detailed_incident(report, finding):
                 f"messages={group.get('entry_count', '?')}, "
                 f"units={', '.join(group.get('units') or []) or 'unattributed'}")
 
+    lines.extend(["", "TARGETED READ-ONLY COMMANDS (copy and review before running)"])
+    commands = targeted_readonly_commands(report, finding, events)
+    if commands:
+        for command in commands:
+            lines.append(" $ " + command)
+    else:
+        lines.append(" No target-specific command available from verified identifiers.")
     lines.extend(["", "SUGGESTED READ-ONLY CHECKS"])
     for check in finding.get("checks") or []:
         lines.append(" • " + str(check))
