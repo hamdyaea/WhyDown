@@ -118,6 +118,10 @@ try:
     # Simulate an actual double-click in the Qt incident table.
     gui.findings.scrollToItem(first)
     rect = gui.findings.visualItemRect(first)
+    # Qt's item-view double-click requires a preceding press on the item.
+    QtTest.QTest.mouseClick(
+        gui.findings.viewport(), QtCore.Qt.MouseButton.LeftButton,
+        pos=rect.center())
     QtTest.QTest.mouseDClick(
         gui.findings.viewport(), QtCore.Qt.MouseButton.LeftButton,
         pos=rect.center())
