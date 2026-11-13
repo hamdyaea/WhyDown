@@ -362,3 +362,27 @@ Fixes: explicit selection/Enter instructions, visible change confirmations for f
   `--overwrite`, and refusal to overwrite history itself.
 - Manual field validation remains pending on CachyOS, Manjaro, Debian/Ubuntu,
   ARM64 and a real Nagios/PNP4Nagios monitoring server.
+
+## v0.12.1 — CachyOS Opera transient desktop unit and scope validation
+
+- User-provided CachyOS v0.12.0 report: `app-opera@...service` was a
+  transient session launcher from a system-wide `opera.desktop`, launched
+  with the local Nagios dashboard file and exited `status=24`; the user
+  manager initially had one failed unit, and later both user and system
+  failed-unit lists were empty after `systemctl --user reset-failed`.
+  The journal continued to retain two historical failure windows, one
+  still unattributed. These observations are the basis for **synthetic
+  regression tests**, not a live validation of v0.12.1 yet.
+- Verified manager-specific bounded lookups: `systemctl --user show` for
+  user/transient units and ordinary `systemctl show` for system units.
+  `LoadState=not-found` never counts as a verified current healthy state.
+- Only whitelisted numeric exit statuses, exit-code results, transient
+  flag, and a system-wide desktop-entry boolean are retained; no
+  `ExecStart`, `FragmentPath`, user filenames, full log lines or paths.
+- Same-second `Main process exited` + `Failed with result` messages
+  remain one event but expose both safe codes in the CLI/JSON/GUI.
+- Confirm a resolved app-*.service exit status 24 is informational, while
+  unresolved unattributed messages, still-failed user units and exit status
+  1 remain warnings.
+- Verify copyable Qt6 commands for user units include `--user` and
+  cannot inherit system-manager context or unsafe command arguments.
