@@ -1,46 +1,95 @@
-# Native packaging for Debian-based and Arch-based Linux
+# WhyDown native packages — Kali, Debian, Ubuntu, Arch, Manjaro, CachyOS
 
-### Native packages: Kali, Debian, Ubuntu and Arch derivatives
+WhyDown v0.12.3 ships verified Debian packages and AUR recipes. The
+diagnostic engine is read-only and does not install a service or telemetry.
 
-**Kali / Debian / Ubuntu**: GitHub Releases publish architecture-specific
-`.deb` files for **amd64** and **arm64** (same Debian package across these
-distributions). Download the correct architecture and install it with:
+## Kali Linux / Debian / Ubuntu (.deb)
+
+Choose the architecture reported by `dpkg --print-architecture`.
+
+| CPU architecture | Official release downloads |
+| --- | --- |
+| Intel/AMD 64-bit (`amd64`) | [whydown_0.12.3-1_amd64.deb](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb) · [SHA-256](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_amd64.deb.sha256) |
+| ARM 64-bit (`arm64`) | [whydown_0.12.3-1_arm64.deb](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_arm64.deb) · [SHA-256](https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3/whydown_0.12.3-1_arm64.deb.sha256) |
+
+### Download, verify and install (Bash/Zsh/Fish compatible)
+
+Paste this entire block; it chooses the package matching your CPU:
 
 ```bash
-sudo apt install ./whydown_0.12.3-1_amd64.deb  # x86_64 Intel/AMD
-# or: sudo apt install ./whydown_0.12.3-1_arm64.deb  # 64-bit ARM
+bash <<'BASH'
+set -euo pipefail
+arch="$(dpkg --print-architecture)"
+case "$arch" in
+  amd64|arm64) ;;
+  *) echo "Unsupported Debian package architecture: $arch" >&2; exit 1 ;;
+esac
+sudo apt update
+sudo apt install -y curl ca-certificates python3 python3-pyqt6
+base="https://github.com/hamdyaea/WhyDown/releases/download/v0.12.3"
+file="whydown_0.12.3-1_${arch}.deb"
+curl -fL --retry 3 -O "$base/$file"
+curl -fL --retry 3 -O "$base/$file.sha256"
+sha256sum -c "$file.sha256"
+sudo apt install -y "./$file"
 whydown --version
-whydown gui
+BASH
 ```
 
-The package installs `/usr/bin/whydown`, a freedesktop launcher and icon.
-The CLI/TUI work without Python/Qt; `python3` and `python3-pyqt6`
-are **recommended** for the desktop GUI. These .deb files are built from
-statically linked musl binaries for broad glibc distribution compatibility.
-They do not modify any services.
+After installation, launch `whydown gui`, `whydown tui`, or
+`whydown diagnose --focus all --since 4h --current-boot --journal-messages`.
+These commands do not require a Git checkout or a Rust compiler.
 
-**Arch / Manjaro / CachyOS**: the same AUR `PKGBUILD` works on all three.
-Find the ready-to-submit stable source recipe in
-[`packaging/aur/whydown/`](../packaging/aur/whydown/) and deployment instructions
-in [AUR packaging](../packaging/aur/README.md). The alternative `whydown-bin` recipe is provided under
-[`packaging/aur/whydown-bin/`](../packaging/aur/whydown-bin/) with
-SHA-256 hashes verified against both v0.12.3 release archives.
-AUR submissions are independent of GitHub Releases and require AUR SSH access.
-Do not install both the source and binary variants.
+### Required and optional dependencies
 
-**Manual .deb build** (on compatible Debian-family amd64 or arm64):
+- **CLI/TUI:** The packaged native static musl executable has no Qt/Python
+  dependency. Standard Linux tools such as `journalctl`, `systemctl`, `df`
+  and `dpkg-query` are used only when available; inaccessible checks are
+  reported explicitly.
+- **Qt6 graphical frontend:** `python3` and `python3-pyqt6` from APT are
+  needed. These are `Recommends` of the .deb, not strict dependencies, so
+  headless installs can use `sudo apt install --no-install-recommends
+  ./whydown_0.12.3-1_${arch}.deb` after downloading the correct file.
+  A graphical X11/XWayland/Wayland session is needed to display the window.
+- **Installer/download:** `curl` and `ca-certificates` are used for
+  fetching the assets securely and can be omitted if you already downloaded
+  them via a browser. APT resolves native package dependencies automatically.
+
+`/usr/bin/whydown`, its desktop launcher and its icon are installed by the
+.deb. This is distinct from the optional unprivileged installer under
+`~/.local/bin/whydown`; to check which binary your shell executes, run
+`type -a whydown`. If you previously installed a user-local binary, it may
+take precedence over the APT package in `PATH`.
+
+For upgrades, install the newer .deb using `sudo apt install ./new-file.deb`.
+For removal, run `sudo apt remove whydown`. APT does not auto-add the upstream
+GitHub Releases page as an APT repository.
+
+### Building a .deb manually
+
+From a checked-out WhyDown repository, on amd64 or arm64:
 
 ```bash
+cargo test --all-targets --locked
 cargo build --release --locked
 bash packaging/deb/build-deb.sh target/release/whydown dist
+( cd dist && sha256sum -c ./*.deb.sha256 )
 dpkg-deb --info dist/whydown_*.deb
 ```
 
-All native-package scripts are in the repository; the binary releases
-remain available for people who prefer the unprivileged `~/.local/bin` installer.
+The GitHub release workflow builds packages separately for both supported
+architectures, using static musl binaries. It checks file integrity, installed
+payload and the launcher before publication.
 
+## Arch Linux / Manjaro / CachyOS (AUR)
 
+The same AUR recipes work across Arch-derived distributions:
 
-## Release build and AUR validation
+- [`whydown` — build from tagged source](../packaging/aur/whydown/)
+- [`whydown-bin` — prebuilt musl binaries, SHA-256 pinned](../packaging/aur/whydown-bin/)
 
-The automated release builds both native amd64 and arm64 static musl binaries and generates verified .deb assets. For the AUR, run `makepkg --printsrcinfo > .SRCINFO` under Arch/Manjaro/CachyOS and verify the resulting metadata before publishing. Building from the tagged Rust source requires the original GitHub vX.Y.Z tag.
+Install only one variant. The GUI requires `python-pyqt6` (optional dependency
+in both PKGBUILDs). Follow the
+[SSH publication procedure](../packaging/aur/README.md) to submit the
+`PKGBUILD` and generated `.SRCINFO` for each package. AUR itself hosts
+recipes, not the release binaries or compiled Arch packages.
