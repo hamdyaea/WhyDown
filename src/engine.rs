@@ -93,7 +93,7 @@ pub fn analyze(snapshot: Snapshot, lookback_seconds: u64, focus: Focus, demo: bo
         group_service_messages(&events, 5).into_iter().rev().take(30)
             .collect::<Vec<_>>().into_iter().rev().collect()
     } else { Vec::new() };
-    let timeline = events.into_iter().rev().take(60).collect::<Vec<_>>()
+    let timeline = events.into_iter().rev().take(300).collect::<Vec<_>>()
         .into_iter().rev().collect();
 
     Report {
@@ -258,7 +258,7 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             id: "LINK_DISCONNECTS",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: "Network link disconnections were reported".into(),
+            title: if interfaces.len() == 1 { format!("Network link interruption on {}", interfaces[0]) } else { "Network link disconnections were reported".into() },
             explanation: "The selected journal contains messages consistent with link loss or Wi-Fi disconnection. The physical cause cannot be established from these messages alone.".into(),
             evidence: {
                 let mut items = vec![
@@ -294,7 +294,7 @@ fn diagnose_network(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<Fi
             id: "DHCP_FAILURES",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: "DHCP failures were reported".into(),
+            title: { let interfaces = event_subjects(events, EventKind::DhcpProblem); if interfaces.len() == 1 { format!("DHCP problem on {}", interfaces[0]) } else { "DHCP failures were reported".into() } },
             explanation: "DHCP-related failures appear in the journal. This could reflect a router, link, lease or client issue; further checks are required.".into(),
             evidence: {
                 let mut items = vec![format!("{dhcp} classified DHCP event(s)")];
@@ -489,7 +489,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
             id: "SERVICE_FAILURE_LOGS",
             severity: Severity::Warning,
             confidence: Confidence::Observed,
-            title: "Historical service-failure messages appeared in the journal".into(),
+            title: { let units = event_subjects(events, EventKind::ServiceFailure); if units.len() == 1 { format!("Historical service failure: {}", units[0]) } else if units.len() > 1 { format!("Historical service failures: {} identified units", units.len()) } else { "Historical service-failure messages appeared in the journal".into() } },
             explanation: "Classified journal entries are NOT a count of independently failed services. Multiple units and unrelated generic messages may occur at the same time. Current system/user failed-unit states are checked separately when available.".into(),
             evidence: {
                 let mut evidence = vec![
