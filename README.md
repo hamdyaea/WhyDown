@@ -66,6 +66,12 @@ If `~/.local/bin` is in your `PATH`, use `whydown` instead of the full path.
 The GUI starts in **Dark** mode on first launch. Change **Appearance** to
 *Dark*, *Light* or *System* at any time. Your explicit choice is remembered.
 
+**Investigate an alert:** after a diagnosis, the first page lists the exact
+affected interfaces or systemd units when identifiable, times and event counts.
+**Double-click an incident** to open a detailed page with matched journal
+indicators (e.g. Wi-Fi reason or service exit status), current state and
+read-only verification commands. Nothing is repaired or uploaded.
+
 ## Useful commands
 
 ```bash
