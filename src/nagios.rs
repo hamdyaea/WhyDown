@@ -111,7 +111,7 @@ fn parse_finite(raw: &str) -> Result<f64, String> {
     Ok(value)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Spec {
     pub choice: &'static str,
     pub label: &'static str,
