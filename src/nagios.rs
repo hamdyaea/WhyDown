@@ -394,7 +394,7 @@ fn demo_value(choice: &str) -> (f64, &'static str) {
     match choice {
         "memory" => (62.5, "fictional MemAvailable, no host inspection"),
         "swap" => (18.0, "fictional swap usage"),
-        "disk" => (91.0, "fictional local disk at 91%"),
+        "disk" => (88.0, "fictional local disk at 88%"),
         "inodes" => (34.0, "fictional inode usage"),
         "load" => (105.0, "fictional one-minute load per logical CPU"),
         "cpu-psi" => (24.0, "fictional CPU stall pressure"),
