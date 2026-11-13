@@ -5,6 +5,7 @@ All notable changes to WhyDown will be documented here.
 ## [0.12.3] - 2026-11-13
 
 ### Portable release checksums
+- Publish a separate checksum-pinned `whydown-bin` AUR recipe for x86_64 and aarch64, alongside the source-build `whydown` recipe.
 - Fix `.deb.sha256` sidecar files to contain only the archive basename instead of an absolute build-runner path, so `sha256sum -c` works after downloading or moving the packages.
 - Add CI guards that validate release checksum portability. No diagnostic behavior or JSON schema changes relative to 0.12.2.
 
