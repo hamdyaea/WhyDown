@@ -827,43 +827,82 @@ class WhyDownGUI(QtWidgets.QMainWindow if QtWidgets else object):
         self.metrics["info"].setText(str(summary.get("info_count", 0)))
         self.metrics["events"].setText(str(r.get("journal_entries_examined", 0)))
         self.findings.clear()
-        for i, finding in enumerate(r["findings"]):
+        for i, finding in sorted(
+                enumerate(r["findings"]),
+                key=lambda indexed: (indexed[1].get("severity") != "warning", indexed[0])):
+            info = overview_row(r, finding)
             item = QtWidgets.QTreeWidgetItem([
-                str(finding.get("title", "Finding")),
-                str(finding.get("severity", ""))])
+                info["severity"], info["title"], info["affected"],
+                info["observed"], info["events"]])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, i)
+            item.setToolTip(1, info["title"] + "\n" + info["preview"])
             if finding.get("severity") == "warning":
-                item.setForeground(1, QtGui.QBrush(QtGui.QColor("#b85f28")))
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor("#e98d4f")))
             self.findings.addTopLevelItem(item)
+        for column in range(5):
+            self.findings.resizeColumnToContents(column)
+        self.findings.setColumnWidth(1, min(440, max(240, self.findings.columnWidth(1))))
+        self.detail.setPlainText(
+            "Double-click an incident in the overview for its detailed dossier.")
         if r["findings"]:
             self.findings.setCurrentItem(self.findings.topLevelItem(0))
         else:
-            self.detail.setPlainText("No classified findings. Not a health guarantee.")
+            self.overview_preview.setPlainText("No classified findings. Not a health guarantee.")
         self.events.clear()
         for e in reversed(r["timeline"][-300:]):
             item = QtWidgets.QTreeWidgetItem([
                 str(e.get("timestamp", "")),
                 str(e.get("label", e.get("kind", ""))),
                 str(e.get("subject") or ""), str(e.get("source") or "")])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, e)
             self.events.addTopLevelItem(item)
         for i in range(4): self.events.resizeColumnToContents(i)
         self.coverage.setPlainText(coverage_details(r))
         self.tabs.setCurrentIndex(0)
         self.save_button.setEnabled(True)
         suffix = " · Partial journal window" if r.get("journal_truncated") else ""
-        self.status.setText("Analysis complete. Select and copy any evidence passage." + suffix)
+        self.status.setText("Analysis complete. Select an alert, then double-click for the full incident dossier." + suffix)
 
     def _finding_changed(self, current, previous):
         del previous
-        if current is None or self.report is None: return
+        if current is None or self.report is None:
+            return
         i = current.data(0, QtCore.Qt.ItemDataRole.UserRole)
-        if isinstance(i, int) and i < len(self.report["findings"]):
-            self.detail.setPlainText(finding_details(self.report["findings"][i]))
+        if isinstance(i, int) and 0 <= i < len(self.report["findings"]):
+            finding = self.report["findings"][i]
+            info = overview_row(self.report, finding)
+            preview = (
+                f"{info['severity']}  •  {info['title']}\n"
+                f"Affected: {info['affected']}  |  First event: {info['observed']}\n"
+                f"{info['preview']}\n"
+                "Double-click this row to inspect matching event timestamps, "
+                "safe diagnostic codes, current system state and suggested checks.")
+            self.overview_preview.setPlainText(preview)
+
+    def open_finding(self, item, _column=0):
+        if item is None or self.report is None:
+            return
+        index = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not isinstance(index, int) or not 0 <= index < len(self.report["findings"]):
+            return
+        self.detail.setPlainText(detailed_incident(self.report, self.report["findings"][index]))
+        self.detail.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+        self.tabs.setCurrentIndex(1)
+
+    def open_event(self, item, _column=0):
+        if item is None or self.report is None:
+            return
+        event = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not isinstance(event, dict):
+            return
+        self.detail.setPlainText(event_dossier(event))
+        self.detail.moveCursor(QtGui.QTextCursor.MoveOperation.Start)
+        self.tabs.setCurrentIndex(1)
 
     def copy_selection(self):
         index = self.tabs.currentIndex()
-        if index != 1:
-            editor = self.detail if index == 0 else self.coverage
+        if index != 2:
+            editor = {0: self.overview_preview, 1: self.detail, 3: self.coverage}[index]
             selected = editor.textCursor().selectedText().replace("\u2029", "\n")
         else:
             selected = "\n".join(
