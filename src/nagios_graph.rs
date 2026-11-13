@@ -229,7 +229,7 @@ fn chart_svg(spec: Spec, source: &[Point]) -> String {
             }
         }
     }
-    if points.len() > 1 && span_t > 1 {
+    if points.len() > 1 && first != last {
         let poly = points.iter().map(|p| format!("{:.2},{:.2}", x(p.timestamp), y(p.value)))
             .collect::<Vec<_>>().join(" ");
         let _ = write!(svg, r##"<polyline points="{poly}" fill="none" stroke="#37dfd0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>"##);
@@ -244,7 +244,7 @@ fn chart_svg(spec: Spec, source: &[Point]) -> String {
     let _ = write!(svg, r##"<text x="{right:.0}" y="250" text-anchor="end" font-size="12" fill="#b0c6d8">{}</text>"##, escaped(&label_end));
     let _ = write!(svg, r##"<text x="66" y="277" font-size="12" fill="#79e5dd">{} measurements; latest {:.2}{}</text>"##,
         source.len(), source.last().map_or(0.0, |p| p.value), escaped(spec.uom));
-    if span_t == 1 {
+    if first == last {
         svg.push_str(r##"<text x="860" y="277" text-anchor="end" font-size="12" fill="#ffca85">One timestamp — no trend yet</text>"##);
     }
     if points.iter().any(|p| p.demo) {
