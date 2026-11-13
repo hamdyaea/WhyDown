@@ -72,7 +72,7 @@ fn nagios_recording_svg_dashboard_and_private_file_safety() {
     let plot = fs::read_to_string(&svg).unwrap();
     assert!(plot.starts_with("<svg "));
     assert!(plot.contains("<polyline"));
-    assert!(plot.contains("62.50%"));
+    assert!(plot.contains("75.00%")); // newest real timestamp, not the older demo reading
     let existing = whydown(&["nagios","graph","--history",h,"--metric","memory",
         "--output",g]);
     assert_eq!(existing.status.code(), Some(3));
