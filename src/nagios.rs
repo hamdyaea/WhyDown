@@ -455,8 +455,9 @@ pub fn append_history(path: &Path, samples: &[Sample], demo: bool) -> Result<(),
     let origin = if demo { "demo" } else { "live" };
     for sample in samples {
         if let Some(value) = sample.value {
-            rows.push_str(&format!("{}\t{}\t{:.4}\t{}\t{}\n",
-                epoch, sample.spec.label, value, sample.state().label(), origin));
+            rows.push_str(&format!("{}\t{}\t{:.4}\t{}\t{}\t{}\t{}\n",
+                epoch, sample.spec.label, value, sample.state().label(), origin,
+                sample.warning.raw, sample.critical.raw));
         }
     }
     if rows.is_empty() { return Err("no measured values to record".into()); }
