@@ -10,6 +10,8 @@ pub mod engine;
 pub mod gui;
 pub mod health;
 pub mod model;
+pub mod nagios;
+pub mod nagios_graph;
 pub mod progress;
 pub mod render;
 pub mod time;
