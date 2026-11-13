@@ -11,7 +11,7 @@ Consumers must check `schema_version` and should compare the same `focus` and `l
 - `system`: OS/kernel, uptime, routes, local DNS configuration, failed systemd units, interfaces with counters and optional `operstate`, disks and optional directory breakdowns
 - `findings`: `id`, `severity`, `confidence`, `scope`, `title`, `explanation`, `evidence`, `checks`
 - `network_incidents`: historical event clusters, including `subject` (identified network interface, or `null`) and start/end times
-- `timeline`: `timestamp`, `kind`, `label`, `subject` and `source`; optional subject/source are `null` when unknown
+- `timeline`: `timestamp`, `kind`, `label`, `subject`, `source` and optional `diagnostic_hint`; subject/source/hint are `null` when unavailable
 - `collection_notes`: permission, missing-command and journal-truncation caveats
 
 ## Temporal scope and confidence
@@ -28,7 +28,7 @@ The engine never probes network endpoints and does not monitor continuously.
 
 ## Privacy and schema compatibility
 
-Only short, ASCII-validated program, network-interface or systemd-unit identifiers are extracted from matching journal entries. No raw journal line is kept. The output may nevertheless contain mountpoints, names of local units/interfaces and other configuration identifiers; review before sharing.
+Only short, ASCII-validated program, network-interface or systemd-unit identifiers and explicitly whitelisted reason/status indicators are extracted from classified journal entries. No raw journal line is kept. The output may nevertheless contain mountpoints, names of local units/interfaces and other configuration identifiers; review before sharing.
 
 Do not silently parse schema 2 as schema 1. For distribution comparisons, use finding IDs, scopes, summaries and limitations rather than timestamps or hostnames.
 
@@ -149,3 +149,24 @@ Journal events are retained as integer Unix seconds; subsecond ordering is not s
 When the journal includes an attributable systemd service failure and service focus is enabled, WhyDown optionally performs read-only, time-bounded `systemctl show` requests for up to four validated system-unit identifiers. The additive `system.service_statuses` array contains objects with `unit`, `load_state`, `active_state`, `sub_state`, `result` and `n_restarts` (nullable integer). An empty array does **not** mean the failed service is healthy; it can mean no attributable units, unavailable systemd, an unsupported/unloaded unit, or no successful query. User-manager units are not queried in this system-manager feature.
 
 A current `active_state=active` plus `sub_state=running` can support the statement that systemd considers the service running **at collection time**. Even together with a past failure and a scheduled restart, it does not verify application health, user-session function, or uninterrupted service availability. Historical `SERVICE_FAILURE_LOGS` warnings remain historical observations. The `SERVICE_RESTART_OBSERVED` finding includes current unit status only when successfully collected, and may otherwise stay limited confidence.
+
+## Additions in WhyDown v0.11.0 (schema remains 2)
+
+- `timeline[].diagnostic_hint` is a nullable, bounded string containing one
+  or more **strictly whitelisted diagnostic indicators** recovered from the
+  original *classified* journal message. Examples:
+  `reason=2=PREV_AUTH_NOT_VALID`, `exit_status=1/FAILURE`,
+  `systemd_result=exit-code`, `dhcp_timeout=reported`, or
+  `transition=activated_to_disconnected`. Unrecognized or unsafe values
+  remain `null` instead of being copied as arbitrary log content.
+- Journal source/subject and whole-second UTC timestamp remain the
+  only existing event identifiers. No access-point MAC, Wi-Fi SSID,
+  hostname, credentials, service command arguments or free-form journal
+  messages are retained by this feature.
+- The timeline now includes up to **300 most recent classified events**
+  instead of 60. It is still a bounded, potentially incomplete sample,
+  not the raw journal or a guaranteed full incident history.
+- Qt6's incident overview and double-click details page correlate events
+  by known rule IDs/event types and display relevant current snapshot values.
+  These are presentation changes to the existing `findings[]` and
+  `system` structures, not additional validation of cause or recovery.
