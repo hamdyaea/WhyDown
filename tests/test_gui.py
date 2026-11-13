@@ -149,11 +149,18 @@ class TestWhyDownGUI(unittest.TestCase):
                      "not a confirmed root cause"):
             self.assertIn(term, wifi_dossier)
         self.assertNotIn("exit_status=1/FAILURE", wifi_dossier)
+        self.assertIn("ip -s link show dev wlan0", wifi_dossier)
+        self.assertIn("nmcli device show wlan0", wifi_dossier)
         svc_dossier = gui.detailed_incident(data, svc)
         self.assertIn("sshd.service", svc_dossier)
         self.assertIn("exit_status=1/FAILURE", svc_dossier)
         self.assertIn("CURRENT SYSTEMD STATE", svc_dossier)
         self.assertNotIn("reason=2", svc_dossier)
+        self.assertIn("systemctl status sshd.service --no-pager", svc_dossier)
+        self.assertIn("journalctl -u sshd.service --no-pager -n 100", svc_dossier)
+        forged = [dict(data["timeline"][0], subject="wlan0;rm -rf /")]
+        self.assertFalse(any("rm" in cmd for cmd in
+                             gui.targeted_readonly_commands(data, wifi, forged)))
         standalone = gui.detailed_incident(
             data, {"id": "FAILED_SYSTEMD_UNITS", "title": "Current units failed",
                    "severity": "warning", "scope": "current_snapshot",
