@@ -1,5 +1,6 @@
 use std::process::Command;
 use std::fs;
+use std::io::Write;
 
 fn whydown(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_whydown"))
@@ -57,6 +58,13 @@ fn nagios_recording_svg_dashboard_and_private_file_safety() {
         .map(str::to_string).collect();
     assert_eq!(lines.len(), whydown::nagios::SPECS.len() * 2);
     assert!(lines.iter().any(|l| l.contains("\tmem_used_pct\t62.5000\tOK\tdemo")));
+    // Repeated samples in the same second are not a trend. Simulate a
+    // distinct later timestamp to exercise an actual time-series line.
+    let first_ts: u64 = lines[0].split('\t').next().unwrap().parse().unwrap();
+    let later = format!("{}\tmem_used_pct\t75.0000\tOK\tlive\t80\t95\n",
+        first_ts + 300);
+    std::fs::OpenOptions::new().append(true).open(&history).unwrap()
+        .write_all(later.as_bytes()).unwrap();
 
     let graphed = whydown(&["nagios","graph","--history",h,"--metric","memory",
         "--output",g]);
