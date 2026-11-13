@@ -822,6 +822,10 @@ mod tests {
             events,
             service_statuses: vec![crate::model::ServiceStatus {
                 unit: "lightdm.service".into(),
+                manager: "system".into(),
+                transient: None,
+                desktop_entry: false,
+                exec_main_status: None,
                 load_state: "loaded".into(),
                 active_state: "active".into(),
                 sub_state: "running".into(),
