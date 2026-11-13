@@ -583,7 +583,7 @@ fn diagnose_services(snapshot: &Snapshot, events: &[Event], findings: &mut Vec<F
                         event.kind == EventKind::ServiceFailure
                         && event.subject.as_deref() == Some(status.unit.as_str()))) {
                     evidence.push(format!(
-                        "{}: current {} manager state load={} active={}/{} result={}                          exit_status={} transient={} desktop_entry={} (not application readiness)",
+                        "{}: current {} manager state load={} active={}/{} result={}                          exec_main_status={} transient={} desktop_entry={} (main process only; control process may differ)",
                         status.unit, status.manager, status.load_state, status.active_state,
                         status.sub_state, status.result,
                         status.exec_main_status.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),

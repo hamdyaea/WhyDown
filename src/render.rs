@@ -145,7 +145,7 @@ pub fn text(report: &Report) -> String {
         if !report.snapshot.service_statuses.is_empty() {
             writeln!(out, "  Targeted unit states (verified system/user managers; not app health):").unwrap();
             for unit in &report.snapshot.service_statuses {
-                writeln!(out, "    {} [{} manager]: load={} active={} sub={} result={} exit_status={} transient={} desktop_launcher={} NRestarts={}",
+                writeln!(out, "    {} [{} manager]: load={} active={} sub={} result={} exec_main_status={} transient={} desktop_launcher={} NRestarts={}",
                     unit.unit, unit.manager, unit.load_state, unit.active_state,
                     unit.sub_state, unit.result,
                     unit.exec_main_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
@@ -681,7 +681,7 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         if !report.snapshot.service_statuses.is_empty() {
             out.push_str("<h3>Targeted current unit states</h3><p class=\"muted\">Scoped user/system manager state; application readiness is not verified.</p><ul>");
             for unit in &report.snapshot.service_statuses {
-                write!(out, "<li><code>{}</code> [manager={}]: load={}, active={}, sub={}, result={}, exit_status={}, transient={}, desktop_launcher={}, NRestarts={}</li>",
+                write!(out, "<li><code>{}</code> [manager={}]: load={}, active={}, sub={}, result={}, exec_main_status={}, transient={}, desktop_launcher={}, NRestarts={}</li>",
                     html_escape(&unit.unit), html_escape(&unit.manager),
                     html_escape(&unit.load_state),
                     html_escape(&unit.active_state), html_escape(&unit.sub_state),
@@ -804,7 +804,7 @@ mod tests {
             source: Some("systemd".into()),
         });
         let report = engine::analyze(snapshot, 3600, Focus::All, true);
-        assert!(text(&report).contains("active=active sub=running result=success exit_status=unknown transient=unknown desktop_launcher=false NRestarts=1"));
+        assert!(text(&report).contains("active=active sub=running result=success exec_main_status=unknown transient=unknown desktop_launcher=false NRestarts=1"));
         let j = json(&report);
         assert!(j.contains("\"service_statuses\""));
         assert!(j.contains("\"n_restarts\": 1"));
