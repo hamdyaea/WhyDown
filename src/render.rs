@@ -143,10 +143,14 @@ pub fn text(report: &Report) -> String {
             writeln!(out, "  User manager: not checked").unwrap();
         }
         if !report.snapshot.service_statuses.is_empty() {
-            writeln!(out, "  Targeted unit states (read-only system manager snapshot; not app health):").unwrap();
+            writeln!(out, "  Targeted unit states (verified system/user managers; not app health):").unwrap();
             for unit in &report.snapshot.service_statuses {
-                writeln!(out, "    {}: load={} active={} sub={} result={} NRestarts={}",
-                    unit.unit, unit.load_state, unit.active_state, unit.sub_state, unit.result,
+                writeln!(out, "    {} [{} manager]: load={} active={} sub={} result={} exit_status={} transient={} desktop_launcher={} NRestarts={}",
+                    unit.unit, unit.manager, unit.load_state, unit.active_state,
+                    unit.sub_state, unit.result,
+                    unit.exec_main_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.desktop_entry,
                     unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
             }
         }
@@ -184,10 +188,14 @@ pub fn text(report: &Report) -> String {
         writeln!(out, "CLASSIFIED EVENT TIMELINE (last {} {})",
             report.timeline.len(), count_word(report.timeline.len(), "event", "events")).unwrap();
         for event in &report.timeline {
-            writeln!(out, "  {}  {}{}{}",
+            let indicator = report.snapshot.event_contexts.iter().find(|ctx|
+                ctx.timestamp == event.timestamp && ctx.kind == event.kind
+                && ctx.subject == event.subject).map(|ctx| ctx.signal.as_str());
+            writeln!(out, "  {}  {}{}{}{}",
                 utc_timestamp(event.timestamp), event.kind.label(),
                 event.subject.as_deref().map(|v| format!(" [{}]", v)).unwrap_or_default(),
-                event.source.as_deref().map(|v| format!(" via {}", v)).unwrap_or_default()).unwrap();
+                event.source.as_deref().map(|v| format!(" via {}", v)).unwrap_or_default(),
+                indicator.map(|v| format!(" | {v}")).unwrap_or_default()).unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -374,6 +382,10 @@ pub fn json(report: &Report) -> String {
             ("system_units_checked", JsonValue::Bool(s.system_units_checked)),
             ("service_statuses", arr(s.service_statuses.iter().map(|unit| object(vec![
                 ("unit", js(unit.unit.clone())),
+                ("manager", js(unit.manager.clone())),
+                ("transient", opt_bool(unit.transient)),
+                ("desktop_entry", JsonValue::Bool(unit.desktop_entry)),
+                ("exec_main_status", opt_num(unit.exec_main_status)),
                 ("load_state", js(unit.load_state.clone())),
                 ("active_state", js(unit.active_state.clone())),
                 ("sub_state", js(unit.sub_state.clone())),
@@ -648,12 +660,16 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
             }).unwrap();
         out.push_str("</p>");
         if !report.snapshot.service_statuses.is_empty() {
-            out.push_str("<h3>Targeted current unit states</h3><p class=\"muted\">System-manager state only; application readiness is not verified.</p><ul>");
+            out.push_str("<h3>Targeted current unit states</h3><p class=\"muted\">Scoped user/system manager state; application readiness is not verified.</p><ul>");
             for unit in &report.snapshot.service_statuses {
-                write!(out, "<li><code>{}</code>: load={}, active={}, sub={}, result={}, NRestarts={}</li>",
-                    html_escape(&unit.unit), html_escape(&unit.load_state),
+                write!(out, "<li><code>{}</code> [manager={}]: load={}, active={}, sub={}, result={}, exit_status={}, transient={}, desktop_launcher={}, NRestarts={}</li>",
+                    html_escape(&unit.unit), html_escape(&unit.manager),
+                    html_escape(&unit.load_state),
                     html_escape(&unit.active_state), html_escape(&unit.sub_state),
                     html_escape(&unit.result),
+                    unit.exec_main_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.desktop_entry,
                     unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
             }
             out.push_str("</ul>");
