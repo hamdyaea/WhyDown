@@ -99,7 +99,7 @@ pub fn parse_history(text: &str) -> Result<BTreeMap<&'static str, Vec<Point>>, S
         let Ok(timestamp) = fields[0].parse::<u64>() else { continue; };
         if !(946_684_800..=4_102_444_800).contains(&timestamp) { continue; }
         let Ok(value) = fields[2].parse::<f64>() else { continue; };
-        if !value.is_finite() || value < 0.0 || value > 100_000_000.0 { continue; }
+        if !value.is_finite() || !(0.0..=100_000_000.0).contains(&value) { continue; }
         let state = match fields[3] {
             "OK" => State::Ok,
             "WARNING" => State::Warning,
