@@ -40,6 +40,13 @@ sh scripts/install.sh --desktop
 The installer checks optional graphical dependencies and tells you what is
 missing. It does **not** install system packages automatically.
 
+### Native packages
+
+Kali, Debian and Ubuntu share amd64/arm64 `.deb` packages on
+[GitHub Releases](https://github.com/hamdyaea/WhyDown/releases).
+Arch, Manjaro and CachyOS share the [AUR recipes](packaging/aur/).
+See [native packaging details](docs/PACKAGING.md).
+
 ### GUI prerequisites (Qt 6)
 
 The CLI and terminal menu do not require Python or Qt. For the desktop GUI,
@@ -71,35 +78,23 @@ The GUI starts in **Dark** mode on first launch. Change **Appearance** to
 affected interfaces or systemd units when identifiable, times and event counts.
 **Double-click an incident** to open a detailed page with matched journal
 indicators (e.g. Wi-Fi reason or service exit status), current state and
-read-only verification commands. Nothing is repaired or uploaded.
+read-only verification commands. With original journal messages enabled, WhyDown
+also shows relevant application fatal/error text from a bounded, unit-scoped
+journal when available. It distinguishes `exec_main_status` from the
+`ExecStart` command status (which may be a control process), and strips
+trailing sentence punctuation when identifying a systemd unit. Nothing is
+repaired or uploaded; original messages can contain secrets.
 
 ## Useful commands
 
 ```bash
-# Inspect all areas over the last 4 hours (current boot)
 ~/.local/bin/whydown diagnose --focus all --since 4h --current-boot
-
-# Troubleshoot the network only
-~/.local/bin/whydown diagnose --focus network --since 2h
-
-# Run a guided terminal investigation
+~/.local/bin/whydown diagnose --focus all --since 4h --current-boot --journal-messages
 ~/.local/bin/whydown tui
-
-# Explore a fictional example without reading your computer
 ~/.local/bin/whydown gui --demo
-~/.local/bin/whydown tui --demo
-
-# Save a private structured report
 ~/.local/bin/whydown diagnose --format json --output report.json
-
-# Export a readable HTML report
 ~/.local/bin/whydown diagnose --format html --output report.html
-
-# Show every CLI option
 ~/.local/bin/whydown --help
-
-# Show the WD project logo in ASCII
-~/.local/bin/whydown logo
 ```
 
 ## Nagios / Icinga monitoring and graphs

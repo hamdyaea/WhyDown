@@ -145,10 +145,11 @@ pub fn text(report: &Report) -> String {
         if !report.snapshot.service_statuses.is_empty() {
             writeln!(out, "  Targeted unit states (verified system/user managers; not app health):").unwrap();
             for unit in &report.snapshot.service_statuses {
-                writeln!(out, "    {} [{} manager]: load={} active={} sub={} result={} exec_main_status={} transient={} desktop_launcher={} NRestarts={}",
+                writeln!(out, "    {} [{} manager]: load={} active={} sub={} result={} exec_main_status={} exec_start_status={} transient={} desktop_launcher={} NRestarts={}",
                     unit.unit, unit.manager, unit.load_state, unit.active_state,
                     unit.sub_state, unit.result,
                     unit.exec_main_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.exec_start_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
                     unit.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
                     unit.desktop_entry,
                     unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
@@ -396,6 +397,7 @@ pub fn json(report: &Report) -> String {
                 ("transient", opt_bool(unit.transient)),
                 ("desktop_entry", JsonValue::Bool(unit.desktop_entry)),
                 ("exec_main_status", opt_num(unit.exec_main_status)),
+                ("exec_start_status", opt_num(unit.exec_start_status)),
                 ("load_state", js(unit.load_state.clone())),
                 ("active_state", js(unit.active_state.clone())),
                 ("sub_state", js(unit.sub_state.clone())),
@@ -681,12 +683,13 @@ code{color:#c7e0ff}footer{margin-top:35px;border-top:1px solid var(--border);pad
         if !report.snapshot.service_statuses.is_empty() {
             out.push_str("<h3>Targeted current unit states</h3><p class=\"muted\">Scoped user/system manager state; application readiness is not verified.</p><ul>");
             for unit in &report.snapshot.service_statuses {
-                write!(out, "<li><code>{}</code> [manager={}]: load={}, active={}, sub={}, result={}, exec_main_status={}, transient={}, desktop_launcher={}, NRestarts={}</li>",
+                write!(out, "<li><code>{}</code> [manager={}]: load={}, active={}, sub={}, result={}, exec_main_status={}, exec_start_status={}, transient={}, desktop_launcher={}, NRestarts={}</li>",
                     html_escape(&unit.unit), html_escape(&unit.manager),
                     html_escape(&unit.load_state),
                     html_escape(&unit.active_state), html_escape(&unit.sub_state),
                     html_escape(&unit.result),
                     unit.exec_main_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
+                    unit.exec_start_status.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
                     unit.transient.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into()),
                     unit.desktop_entry,
                     unit.n_restarts.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into())).unwrap();
@@ -790,7 +793,7 @@ mod tests {
             manager: "system".into(),
             transient: None,
             desktop_entry: false,
-            exec_main_status: None,
+            exec_main_status: None, exec_start_status: None,
             load_state: "loaded".into(),
             active_state: "active".into(),
             sub_state: "running".into(),
@@ -804,7 +807,7 @@ mod tests {
             source: Some("systemd".into()),
         });
         let report = engine::analyze(snapshot, 3600, Focus::All, true);
-        assert!(text(&report).contains("active=active sub=running result=success exec_main_status=unknown transient=unknown desktop_launcher=false NRestarts=1"));
+        assert!(text(&report).contains("active=active sub=running result=success exec_main_status=unknown exec_start_status=unknown transient=unknown desktop_launcher=false NRestarts=1"));
         let j = json(&report);
         assert!(j.contains("\"service_statuses\""));
         assert!(j.contains("\"n_restarts\": 1"));

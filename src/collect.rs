@@ -297,7 +297,7 @@ pub fn collect_with_options_and_messages(
                     continue;
                 }
                 progress.detail("systemctl show historical unit in correct manager (max 3s each)");
-                let property = "--property=LoadState,ActiveState,SubState,Result,NRestarts,Transient,FragmentPath,ExecMainStatus";
+                let property = "--property=LoadState,ActiveState,SubState,Result,NRestarts,Transient,FragmentPath,ExecMainStatus,ExecStart";
                 let args_user = ["--user", "show", "--no-pager", property, "--", name.as_str()];
                 let args_system = ["show", "--no-pager", property, "--", name.as_str()];
                 let args: &[&str] = if manager == "user" { &args_user } else { &args_system };
@@ -683,6 +683,29 @@ fn safe_service_unit_name(unit: &str) -> bool {
             || matches!(b, b'@' | b'.' | b'_' | b'-' | b':'))
 }
 
+/// Parse only the numeric exit code from systemd's structured ExecStart field.
+/// This deliberately discards command paths and arguments.
+fn parse_exec_start_status(value: &str) -> Option<u64> {
+    let mut exited = false;
+    let mut status = None;
+    for field in value.split(';').map(str::trim) {
+        if let Some(code) = field.strip_prefix("code=") {
+            exited = code == "exited";
+        } else if exited {
+            if let Some(raw) = field.strip_prefix("status=") {
+                let digits: String = raw.chars().take_while(char::is_ascii_digit).collect();
+                let rest = &raw[digits.len()..];
+                if !digits.is_empty()
+                    && (rest.is_empty() || rest.starts_with('/') || rest.starts_with(' '))
+                {
+                    status = digits.parse::<u64>().ok().filter(|n| *n <= 255);
+                }
+            }
+        }
+    }
+    status
+}
+
 fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<ServiceStatus> {
     if !safe_service_unit_name(unit) || !matches!(manager, "system" | "user") {
         return None;
@@ -695,11 +718,12 @@ fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<Servi
     let mut transient = None;
     let mut desktop_entry = false;
     let mut exec_main_status = None;
+    let mut exec_start_status = None;
     for line in output.lines() {
         let Some((key, value)) = line.split_once('=') else { continue };
         let value = value.trim();
         // Never keep arbitrary FragmentPath/ExecStart contents. Retain only
-        // the boolean that the unit came from a .desktop launcher.
+        // validated metadata and numeric exit codes.
         if key == "FragmentPath" {
             desktop_entry = value.starts_with("/usr/share/applications/")
                 && value.ends_with(".desktop") && value.len() <= 256;
@@ -711,6 +735,10 @@ fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<Servi
         }
         if key == "ExecMainStatus" {
             exec_main_status = value.parse::<u64>().ok().filter(|n| *n <= 255);
+            continue;
+        }
+        if key == "ExecStart" {
+            exec_start_status = parse_exec_start_status(value);
             continue;
         }
         if value.len() > 64 || !value.bytes().all(|c| c.is_ascii_alphanumeric()
@@ -728,7 +756,7 @@ fn parse_service_status(unit: &str, manager: &str, output: &str) -> Option<Servi
     if load_state == "not-found" { return None; }
     Some(ServiceStatus {
         unit: unit.to_owned(), manager: manager.to_owned(),
-        transient, desktop_entry, exec_main_status,
+        transient, desktop_entry, exec_main_status, exec_start_status,
         load_state, active_state: active?, sub_state: sub?,
         result: result?, n_restarts,
     })
@@ -849,6 +877,9 @@ fn event_subject(body: &str, kind: EventKind) -> Option<String> {
     }
     if matches!(kind, EventKind::ServiceFailure | EventKind::ServiceRestartScheduled) {
         for word in text.split_whitespace() {
+            // systemd emits "Failed to start example.service." with a final
+            // sentence dot; it belongs to punctuation, not to the unit name.
+            let word = word.trim_end_matches(['.', ',', ';', ')', ']']);
             if let Some(name) = identifier(word) {
                 if [".service", ".socket", ".mount", ".timer", ".target", ".path"]
                     .iter().any(|suffix| name.ends_with(suffix)) {
@@ -1658,6 +1689,31 @@ trigger-await\tiW \n";
         assert!(!safe_service_unit_name("../../x.service"));
         assert!(!safe_service_unit_name("test.service\nInjected=true"));
         assert!(safe_service_unit_name("systemd-user@1000.service"));
+    }
+
+    #[test]
+    fn sentence_final_period_still_attributes_failed_service() {
+        let logs = "1794499328.0 kali systemd[1]: Failed to start vboxadd-service.service.\n";
+        let (events, contexts) = parse_journal_with_context_and_messages(logs, true);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].subject.as_deref(), Some("vboxadd-service.service"));
+        assert_eq!(contexts[0].subject.as_deref(), Some("vboxadd-service.service"));
+    }
+
+    #[test]
+    fn exec_start_control_failure_is_distinct_from_main_process_status() {
+        let raw = concat!(
+            "LoadState=loaded\nActiveState=failed\nSubState=failed\n",
+            "Result=exit-code\nExecMainStatus=0\n",
+            "ExecStart={ path=/opt/Guest Additions/private ; argv[]=secret ; ",
+            "ignore_errors=no ; pid=746 ; code=exited ; status=1/FAILURE }\n"
+        );
+        let state = parse_service_status("vboxadd-service.service", "system", raw).unwrap();
+        assert_eq!(state.exec_main_status, Some(0));
+        assert_eq!(state.exec_start_status, Some(1));
+        assert!(!format!("{state:?}").contains("secret"));
+        assert_eq!(parse_exec_start_status("path=/private status=99 ; code=exited ; status=0/SUCCESS"), Some(0));
+        assert_eq!(parse_exec_start_status("path=/private ; code=killed ; status=9/KILL"), None);
     }
 
     #[test]

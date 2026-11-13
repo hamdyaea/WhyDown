@@ -128,6 +128,13 @@ jobs:
           tar -czf "dist/${filename}" -C package whydown README.md LICENSE install.sh
           ( cd dist && sha256sum "${filename}" > "${filename}.sha256" )
           ( cd dist && sha256sum -c "${filename}.sha256" )
+      - name: Build installable .deb (Kali, Debian, Ubuntu)
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash packaging/deb/build-deb.sh "target/${{ matrix.target }}/release/whydown" dist
+          ( cd dist && sha256sum -c ./*.deb.sha256 )
       - uses: actions/upload-artifact@v4
         with:
           name: whydown-${{ matrix.target }}
@@ -148,12 +155,13 @@ jobs:
           pattern: whydown-*
           path: dist
           merge-multiple: true
-      - name: Verify all four archives and checksums
+      - name: Verify Linux archives, .deb packages and checksums
         shell: bash
         run: |
           set -euo pipefail
           test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
-          test "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 4
+          test "$(find dist -maxdepth 1 -name '*.deb' | wc -l)" -eq 2
+          test "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 6
           ( cd dist && sha256sum -c ./*.sha256 )
       - name: Create GitHub Release and vX.Y.Z tag
         env:
@@ -162,7 +170,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$TAG" dist/*.tar.gz dist/*.sha256 \
+          gh release create "$TAG" dist/*.tar.gz dist/*.deb dist/*.sha256 \
             --target "$GITHUB_SHA" \
             --title "WhyDown $TAG" \
             --generate-notes

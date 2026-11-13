@@ -271,8 +271,12 @@ pub struct ServiceStatus {
     /// True only if the installed FragmentPath is a desktop launcher.
     /// No paths or command arguments are retained.
     pub desktop_entry: bool,
-    /// Numeric exit status from systemctl show, not a diagnosis of its cause.
+    /// Main process exit status from systemctl show; this can be 0 even if
+    /// a service's ExecStart control command failed.
     pub exec_main_status: Option<u64>,
+    /// Numeric ExecStart exit status, parsed without retaining command/path/args.
+    /// ExecStart can be the main process or a control process depending on Type.
+    pub exec_start_status: Option<u64>,
     pub load_state: String,
     pub active_state: String,
     pub sub_state: String,

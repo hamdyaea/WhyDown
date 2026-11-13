@@ -2,6 +2,15 @@
 
 All notable changes to WhyDown will be documented here.
 
+## [0.12.2] - 2026-11-13
+
+### Service failure usability and native distribution packages
+- Attribute sentence-final `Failed to start example.service.` records to the correct validated unit; do not print blank diagnostic evidence for unattributed messages.
+- Capture and label the numeric `ExecStart` exit status separately from `ExecMainStatus`, without retaining command paths or arguments, including failures of a service's control/start process. JSON schema remains **2**.
+- When original journal messages are requested, include relevant application-level fatal/error excerpts from bounded, correlated per-unit journald queries, as introduced after v0.12.1.
+- Add verified native Debian packages (`amd64` and `arm64`) for Debian, Kali, and Ubuntu to the automated release workflow, with GUI desktop launcher and icon.
+- Add AUR source package recipe for Arch Linux, Manjaro, and CachyOS; update README with native installation and privacy information.
+
 ## [0.12.1] - 2026-11-13
 
 ### CachyOS systemd user-session incident context
