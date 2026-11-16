@@ -18,6 +18,18 @@ guided terminal menu or the command line.
 
 **Read-only · Offline · No telemetry · GPL-3.0-only**
 
+## Engineering highlights
+
+For engineers and hiring teams evaluating this project:
+
+- **Linux troubleshooting:** correlates local system state and journal evidence into actionable findings.
+- **Rust engineering:** a command-line interface, terminal UI and Qt 6 desktop interface, with distribution packaging for Linux.
+- **Operational safety:** read-only diagnostics, offline operation and no telemetry by design.
+- **Delivery:** documented installation, release packages and verification checks.
+
+See the [technical documentation](docs/) and the installation instructions below for implementation details and limitations.
+
+
 ## Install in 2 minutes
 
 Linux **x86_64 or ARM64** (Manjaro/Arch, Debian, Ubuntu, Raspberry Pi OS and
